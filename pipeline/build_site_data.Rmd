@@ -1,0 +1,669 @@
+---
+title: "Latinobarómetro Explorer — site data build"
+subtitle: "From `LB_TimeSeries_Clean_v1.sav` to `public/data/`"
+author: "Marco Widodo (RA to Larry Diamond)"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    df_print: kable
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# What this notebook does
+
+It writes every number the Latinobarómetro Explorer shows. The website does no
+statistics of its own beyond what its methodology note documents: re-basing
+percentages from the valid to the asked denominator, summing the answers a
+user selects, averaging country estimates into regional lines, and turning a
+correlation and its N into a p-value.
+
+| Output (in `public/data/`) | Content |
+|---|---|
+| `manifest.json` | survey, years, countries (N per year), subgroups, country sets |
+| `index.json` | the question catalogue: type, years asked, default indicator, comparability notes |
+| `v/<var>.json` | all respondents, every year: weighted distributions, means, SEs and N by country-year |
+| `g/<var>.json` | the same by subgroup (gender, age, education, town size), loaded on demand |
+| `r/<year>/index.json`, `r/<year>/<var>.json` | within-country correlations of `<var>` with every eligible item that year |
+
+It follows `LB_Trend_Analysis_Instructions.md` (in `Data Cleaning/`): the clean
+file only, always weighted, both denominators, fixed country sets, a real year
+axis, comparability breaks never bridged. The core helpers (`lb_cy_share()`,
+`lb_cy_mean()`, `lb_region()`) come from `LB_functions.R`, sourced from the data
+folder, and every check below compares the site's numbers against them.
+
+Every check is a `stopifnot()`, so **a knit that finishes means every check passed.**
+Output is written to a staging folder and replaces `public/data` only at the end.
+
+**To rebuild** (R 4.3.3, haven 2.5.4, data.table 1.14.10, jsonlite 1.8.8; about 15 minutes, ~5 GB RAM):
+
+```r
+Sys.setenv(LB_DATA_DIR = "~/Desktop/Larry RA/Latinobarometro Data")
+rmarkdown::render("build_site_data.Rmd")     # from inside pipeline/
+```
+
+Then run the independent Python re-check and the browser-code check:
+
+```sh
+LB_DATA_DIR=".../Latinobarometro Data" python3 pipeline/verify_site_data.py
+node pipeline/check_regions.mjs
+```
+
+# Setup
+
+```{r packages}
+suppressPackageStartupMessages({
+  library(haven); library(readxl); library(dplyr); library(tidyr)
+  library(purrr); library(data.table); library(jsonlite)
+})
+`%||%` <- function(a, b) if (is.null(a)) b else a
+PIPELINE_DIR <- normalizePath(".")
+for (f in sort(list.files("R", pattern = "\\.R$", full.names = TRUE))) source(f)
+stopifnot(file.exists(CLEAN_FILE), file.exists(LB_FUNCTIONS), file.exists(CATALOG),
+          file.exists(COUNTRY_YEAR), file.exists(CROSSWALK))
+source(LB_FUNCTIONS)          # LB_SURVEY_YEARS, LB_COUNTRIES, LB_SET_*, LB_SECTIONS, lb_cy_share(), lb_cy_mean(), lb_region()
+
+countries <- read.csv(file.path(CONFIG_DIR, "countries.csv"), colClasses = c(iso_numeric = "character"))
+iso_of    <- setNames(countries$iso2, countries$lb_code)
+code_of   <- setNames(countries$lb_code, countries$iso2)
+overrides <- read.csv(file.path(CONFIG_DIR, "variable_overrides.csv"))
+trend_ind <- read.csv(file.path(CONFIG_DIR, "trend_indicators.csv"), colClasses = "character")
+trend_brk <- read.csv(file.path(CONFIG_DIR, "trend_breaks.csv"), colClasses = "character")
+catalog   <- read.csv(CATALOG, check.names = FALSE) |> filter(in_clean_file)
+cy_ref    <- read.csv(COUNTRY_YEAR)
+xw        <- read_lb_crosswalk()
+
+# the country list here must be LB_functions.R's
+stopifnot(setequal(countries$lb_code, LB_COUNTRIES$country_code),
+          all(countries$iso3 == LB_COUNTRIES$iso3[match(countries$lb_code, LB_COUNTRIES$country_code)]))
+# the LB-defined sets must match LB_functions.R
+for (s in COUNTRY_SETS) if (!is.null(s$lb)) stopifnot(setequal(code_of[s$countries], get(s$lb)))
+
+YEARS <- if (length(BUILD_YEARS)) intersect(LB_SURVEY_YEARS, BUILD_YEARS) else LB_SURVEY_YEARS
+sources <- tibble(file = basename(c(CLEAN_FILE, LB_FUNCTIONS, CATALOG, COUNTRY_YEAR, CROSSWALK)),
+                  md5 = md5(c(CLEAN_FILE, LB_FUNCTIONS, CATALOG, COUNTRY_YEAR, CROSSWALK)))
+sources
+
+FINAL_DIR <- OUT_DIR
+OUT_DIR <- Sys.getenv("LB_STAGE_DIR", file.path(tempdir(), "site-data"))   # staging folder
+unlink(OUT_DIR, recursive = TRUE); dir.create(OUT_DIR, recursive = TRUE)
+dir.create(REVIEW_DIR, showWarnings = FALSE)
+```
+
+# The clean file
+
+Read once with `user_na = TRUE`, so every negative code is kept and classified
+by code (don't know / no answer = −1, −2, −5; everything else = not asked).
+Columns are stored as integers where possible to halve the memory.
+
+```{r read}
+raw <- read_sav(CLEAN_FILE, user_na = TRUE)
+stopifnot(nrow(raw) == 457499, ncol(raw) == 561)
+var_label <- vapply(raw, function(x) attr(x, "label", exact = TRUE) %||% NA_character_, "")
+val_labels <- lapply(raw, function(x) attr(x, "labels", exact = TRUE))
+lb <- as.data.table(lapply(raw, function(x) {
+  if (is.character(x)) return(x)
+  v <- as.double(vctrs::vec_data(x))
+  if (all(is.na(v) | (v == round(v) & abs(v) < 2e9))) as.integer(v) else v
+}))
+rm(raw); invisible(gc())
+
+# Labels the merge lacks for some codes, taken from the yearly files (config/code_labels.csv)
+code_labels <- read.csv(file.path(CONFIG_DIR, "code_labels.csv"))
+for (i in seq_len(nrow(code_labels))) {
+  v <- code_labels$variable[i]; l <- val_labels[[v]]
+  stopifnot(!code_labels$code[i] %in% l)
+  val_labels[[v]] <- c(l, setNames(as.integer(code_labels$code[i]), code_labels$label[i]))
+}
+code_labels
+
+# the analysis-helper view of the same data (for the checks): labelled columns
+# are not needed by lb_cy_share()/lb_cy_mean(), which read vctrs::vec_data()
+stopifnot(!any(lb$country_code == LB_SPAIN), all(lb$year %in% LB_SURVEY_YEARS),
+          !anyNA(lb$weight), all(lb$weight > 0))
+lb[, iso := unname(iso_of[as.character(country_code)])]
+stopifnot(!anyNA(lb$iso))
+if (length(BUILD_YEARS)) lb <- lb[year %in% YEARS]
+
+# N per country-year equals LB_TimeSeries_Clean_v1_country_year.csv
+cy_n <- lb[, .(n = .N, wmean = mean(weight)), by = .(year, country_code)]
+cmp_n <- merge(cy_n, as.data.table(cy_ref)[year %in% YEARS], by = c("year", "country_code"), all = TRUE)
+stopifnot(!anyNA(cmp_n$n.x), !anyNA(cmp_n$n.y), all(cmp_n$n.x == cmp_n$n.y),
+          max(abs(cmp_n$wmean - cmp_n$weight_mean)) < 1e-6)
+cat(nrow(lb), "respondents,", length(YEARS), "years,", nrow(cy_n), "country-years\n")
+# weights: within-country-year, mean 1 (Uruguay 1995 1.04 and 2002 0.99 as documented)
+cy_n |> filter(abs(wmean - 1) > 0.005)
+```
+
+# Subgroups
+
+```{r subgroups}
+build_memberships <- function(demo) {
+  out <- list(data.table(row = seq_len(nrow(demo)), grp = "all"))
+  for (s in SUBGROUPS) {
+    v <- demo[[s$source]]
+    for (g in s$groups) {
+      hit <- if (!is.null(g$codes)) v %in% g$codes else !is.na(v) & v >= g$range[1] & v <= g$range[2]
+      out[[length(out) + 1]] <- data.table(row = which(hit), grp = g$id)
+    }
+  }
+  m <- rbindlist(out)
+  m[, grp := factor(grp, levels = GROUP_IDS)]
+  setkey(m, row)
+  m
+}
+memb <- build_memberships(lb)
+memb[, .N, by = grp]
+# each respondent is in at most one group per dimension
+for (s in SUBGROUPS) {
+  ids <- vapply(s$groups, `[[`, "", "id")
+  stopifnot(!anyDuplicated(memb[grp %in% ids, row]))
+}
+# town size exists only from 2001
+stopifnot(!any(lb$year[memb[grp %in% c("town_cap", "town_big", "town_small"), row]] < 2001))
+cy_key <- paste0(lb$year, "_", lb$iso)
+wt <- lb$weight
+```
+
+# Catalogue
+
+```{r catalogue}
+qvars <- setdiff(names(lb), c(ADMIN_VARS, "iso"))
+stopifnot(length(qvars) == 552, setequal(qvars, catalog$variable))
+cat_rows <- list(); ct_list <- list()
+for (v in qvars) {
+  xv <- as.numeric(lb[[v]])
+  ct <- code_table(val_labels[[v]], xv)
+  t <- var_type_one(v, var_label[[v]], xv, ct)
+  ov <- overrides[overrides$variable == v, ]
+  if (nrow(ov)) t <- list(type = ov$type[1], reason = paste("override:", ov$note[1]))
+  ct_list[[v]] <- ct
+  pos_nr <- ct |> filter(code >= 0, class == "nonresponse", observed)
+  off <- ct |> filter(class == "offscale", observed)
+  cat_rows[[v]] <- tibble(variable = v, label = catalog$label[match(v, catalog$variable)],
+    section = section_of(v), type = t$type, reason = t$reason,
+    n_scale = sum(ct$class == "substantive" & ct$observed),
+    offscale = paste(sprintf("%g=%s", off$code, off$label), collapse = "; "),
+    positive_nonresponse = paste(sprintf("%g=%s", pos_nr$code, pos_nr$label), collapse = "; "))
+}
+catalogue <- bind_rows(cat_rows)
+# observed answer codes that still have no label (shown by their number): for review
+unlabelled <- bind_rows(lapply(names(ct_list), function(v) {
+  z <- ct_list[[v]] |> filter(observed, code >= 0, is.na(label))
+  if (nrow(z)) tibble(variable = v, codes = paste(head(z$code, 15), collapse = " "), n_codes = nrow(z), class = paste(unique(z$class), collapse = "/"))
+}))
+write.csv(unlabelled, file.path(REVIEW_DIR, "unlabelled_codes.csv"), row.names = FALSE)
+write.csv(catalogue, file.path(REVIEW_DIR, "catalogue_review.csv"), row.names = FALSE, na = "")
+catalogue |> count(type)
+# positive codes counted as nonresponse here but as valid by lb_cy_share(): logged for review
+catalogue |> filter(positive_nonresponse != "") |> select(variable, label, positive_nonresponse)
+catalogue |> filter(offscale != "") |> select(variable, type, offscale)
+# variables set to "exclude" in config/variable_overrides.csv are not published (S_003 birthdate)
+catalogue |> filter(type == "exclude") |> select(variable, label, reason)
+catalogue <- catalogue |> filter(type != "exclude"); qvars <- catalogue$variable
+if (length(BUILD_YEARS)) { qvars <- catalogue$variable[catalogue$type != "empty"]; catalogue <- catalogue |> filter(type != "empty") }
+stopifnot(!any(catalogue$type %in% c("admin", "text", "empty")))
+```
+
+# Estimates: one file per question, all years
+
+For every question: weighted % of valid answers per code, nonresponse % of the
+asked, unweighted counts, mean / SD / SE / Kish effective N for every
+country-year × group. All-respondent cells go in `v/<var>.json`; subgroup
+cells in `g/<var>.json`.
+
+```{r estimates}
+yr_of  <- function(k) as.integer(sub("_.*$", "", k))
+cc_of  <- function(k) sub("^\\d+_", "", k)
+# Subgroup cells are slimmed to what the views use: no per-code counts or SD,
+# Kish effective N to the nearest integer.
+slim <- function(cell) { cell$c <- NULL; cell$sd <- NULL; if (!is.null(cell$ne)) cell$ne <- round(cell$ne); cell }
+nest_cy <- function(est, groups) {
+  out <- list()
+  for (k in names(est)) {
+    cell <- est[[k]][intersect(groups, names(est[[k]]))]
+    if (!identical(groups, "all")) cell <- lapply(cell, slim)
+    if (!length(cell)) next
+    y <- as.character(yr_of(k)); cc <- cc_of(k)
+    if (is.null(out[[y]])) out[[y]] <- list()
+    out[[y]][[cc]] <- if (identical(groups, "all")) cell$all else cell
+  }
+  out[order(as.integer(names(out)))] |> lapply(function(z) z[order(names(z))])
+}
+
+index_vars <- list(); file_sizes <- list(); corr_names <- character(); var_meta <- list(); all_nr <- list()
+sub_groups <- setdiff(GROUP_IDS, "all")
+t0 <- Sys.time()
+for (v in qvars) {
+  cr <- catalogue[catalogue$variable == v, ]
+  ty <- cr$type; ct <- ct_list[[v]]
+  xv <- as.numeric(lb[[v]])
+  cls <- ct$class[match(xv, ct$code)]
+  cls[is.na(xv)] <- "not_asked"
+  # collapse every nonresponse code into one "Don't know / no answer" (-1)
+  nr_raw <- sort(unique(xv[cls == "nonresponse"]))
+  x <- xv; x[cls == "nonresponse"] <- -1
+  # display codes: observed answers, plus (for scales) labelled codes inside the observed range
+  obs_sub <- ct$code[ct$class == "substantive" & ct$observed]
+  sub <- ct |> filter(class %in% c("substantive", "offscale"),
+                      observed | (ty != "nominal" & !is.na(label) & code >= min(obs_sub) & code <= max(obs_sub))) |>
+    arrange(class != "substantive", code)
+  with_mean <- ty != "nominal"
+  if (ty == "continuous") {
+    bins <- make_bins(xv[cls == "substantive"])
+    xbin <- bin_index(xv, bins)
+    codes <- seq_along(bins$labels); labels <- bins$labels
+  } else {
+    xbin <- NULL; codes <- sub$code
+    labels <- ifelse(is.na(sub$label), format(sub$code, trim = TRUE), sub$label)
+  }
+  sparse <- ty == "nominal" && length(codes) > 25
+  keep <- cls %in% c("substantive", "offscale", "nonresponse")
+  m_v <- memb[keep[row]]
+  est <- estimate_cells(x, cls, codes, if (length(nr_raw)) -1 else numeric(), cy_key, wt, m_v, with_mean, xbin, sparse)
+  # A country-year in which every answer is nonresponse is a question that was not
+  # really asked there (e.g. confidence in the armed forces in Costa Rica and Panama,
+  # which have none: the merge codes all 1,000 answers -2). It is not published.
+  nr_only <- names(est)[vapply(est, function(e) (e$all$nv %||% 0) == 0, logical(1))]
+  if (length(nr_only)) all_nr[[v]] <- tibble(variable = v, year = yr_of(nr_only), iso2 = cc_of(nr_only),
+                                              n = vapply(est[nr_only], function(e) e$all$n, 0))
+  est <- est[!names(est) %in% nr_only]
+  if (!length(est)) next
+  est_all <- nest_cy(est, "all")
+  est_grp <- nest_cy(est, sub_groups)
+  years <- as.integer(names(est_all))
+
+  scale_codes <- if (ty == "continuous") numeric() else sub$code[sub$class == "substantive"]
+  ind <- default_indicator(v, ty, scale_codes, trend_ind)
+  if (is.null(ind)) {             # nominal: most common answer in the latest year (mean over countries)
+    last <- est_all[[length(est_all)]]
+    tot <- list()
+    for (cell in last) { kk <- if (!is.null(cell$k)) cell$k else codes
+      for (i in seq_along(kk)) tot[[as.character(kk[i])]] <- (tot[[as.character(kk[i])]] %||% 0) + cell$p[i] }
+    ind <- list(type = "share", codes = arr(as.numeric(names(which.max(unlist(tot))))))
+  }
+  mean_ok <- mean_allowed(ty, scale_codes)
+  brk <- trend_breaks(v, trend_brk)
+  rec <- list(id = v, type = ty, codes = arr(codes), labels = arr(labels),
+              nr = arr(if (length(nr_raw)) -1 else numeric()), nr_labels = arr(if (length(nr_raw)) NR_LABEL else character()),
+              nr_raw = arr(nr_raw), sparse = sparse, years = arr(years))
+  if (ty != "continuous" && any(sub$class == "offscale")) rec$offscale <- arr(sub$code[sub$class == "offscale"])
+  if (ty == "continuous") rec$range <- arr(range(xv[cls == "substantive"], na.rm = TRUE))
+  if (ty == "nominal") {          # the answer list offered (observed) each year: trends compare within lists
+    rec$yc <- lapply(split(xv[cls %in% c("substantive", "offscale")], lb$year[cls %in% c("substantive", "offscale")]),
+                     function(z) arr(sort(unique(z))))
+  }
+  if (!is.null(xw$qn[[v]])) rec$qn <- xw$qn[[v]]
+  if (!is.na(xw$title_es[v])) rec$title_es <- unname(xw$title_es[v])
+  rec$est <- est_all
+  file_sizes[[length(file_sizes) + 1]] <- tibble(kind = "v", id = v, year = NA,
+    bytes = write_json_compact(rec, file.path(OUT_DIR, "v", paste0(v, ".json"))))
+  for (y in names(est_grp))      # one subgroup file per question and year, loaded on demand
+    file_sizes[[length(file_sizes) + 1]] <- tibble(kind = "g", id = v, year = as.integer(y),
+      bytes = write_json_compact(list(id = v, year = as.integer(y), est = est_grp[[y]]), file.path(OUT_DIR, "g", y, paste0(v, ".json"))))
+
+  entry <- list(id = v, q = cr$label, s = cr$section, t = ty, k = length(codes), y = arr(years), d = ind, m = mean_ok)
+  if (ty %in% c("ordinal", "binary")) {
+    on <- sub$label[sub$class == "substantive"]; oc <- sub$code[sub$class == "substantive"]
+    entry$ends <- arr(c(sprintf("%g = %s", oc[1], on[1]), sprintf("%g = %s", oc[length(oc)], on[length(on)])))
+  }
+  note <- catalog$audit_note[match(v, catalog$variable)]
+  if (!is.na(note) && nzchar(note)) entry$note <- note
+  if (!is.null(brk)) entry$tb <- brk
+  if (v %in% trend_ind$variable && trend_ind$featured[trend_ind$variable == v] == "1") entry$f <- 1L
+  if (v %in% trend_ind$variable && nzchar(trend_ind$default_set[trend_ind$variable == v])) entry$ds <- trend_ind$default_set[trend_ind$variable == v]
+  index_vars[[length(index_vars) + 1]] <- entry
+  var_meta[[v]] <- list(type = ty, codes = codes, scale = scale_codes, nr_raw = nr_raw, years = years, sparse = sparse)
+  if (with_mean) corr_names <- c(corr_names, v)
+}
+cat(length(index_vars), "questions written in", format(Sys.time() - t0), "\n")
+all_nr <- bind_rows(all_nr)
+write.csv(all_nr, file.path(REVIEW_DIR, "nonresponse_only_country_years.csv"), row.names = FALSE)
+cat(nrow(all_nr), "country-years left out because every answer was don't know / no answer (see output/nonresponse_only_country_years.csv)\n")
+all_nr |> count(variable, sort = TRUE) |> head(15)
+```
+
+# Correlations, one year at a time
+
+Weighted pairwise Pearson r within each country-year, for every pair of
+ordered, yes/no or numeric questions asked that year (pairwise deletion,
+at least `r MIN_PAIR_N` respondents). Nominal questions are never correlated.
+
+```{r correlations}
+corr_vars_by_year <- list(); cor_store <- list()
+for (y in YEARS) {
+  rows <- which(lb$year == y)
+  vy <- corr_names[vapply(corr_names, function(v) y %in% var_meta[[v]]$years, logical(1))]
+  X <- do.call(cbind, lapply(vy, function(v) {          # substantive (on-scale) answers only
+    xv <- as.numeric(lb[[v]][rows]); ct <- ct_list[[v]]
+    cl <- ct$class[match(xv, ct$code)]; xv[is.na(cl) | cl != "substantive"] <- NA; xv }))
+  colnames(X) <- vy
+  cty <- lb$iso[rows]; w_y <- wt[rows]
+  res <- lapply(split(seq_along(rows), cty), function(r) weighted_pairwise_cor(X[r, , drop = FALSE], w_y[r]))
+  keep_v <- Reduce(`|`, lapply(res, function(cc) diag(cc$n) >= MIN_PAIR_N))
+  X <- X[, keep_v, drop = FALSE]; vy <- vy[keep_v]
+  res <- lapply(res, function(cc) list(r = cc$r[keep_v, keep_v, drop = FALSE], n = cc$n[keep_v, keep_v, drop = FALSE]))
+  for (j in seq_along(vy)) {
+    keep <- names(res)[vapply(res, function(cc) cc$n[j, j] >= MIN_PAIR_N, logical(1))]
+    rr <- lapply(res[keep], function(cc) arr(as.integer(round(1000 * cc$r[j, ]))))
+    # pairwise N stored as n0 - dn: n0 = respondents valid on this item in the country,
+    # dn = how many of them are missing on the other item (mostly 0; keeps files small)
+    n0 <- lapply(res[keep], function(cc) as.integer(cc$n[j, j]))
+    dn <- lapply(res[keep], function(cc) arr(as.integer(cc$n[j, j] - cc$n[j, ])))
+    file_sizes[[length(file_sizes) + 1]] <- tibble(kind = "r", id = vy[j], year = y,
+      bytes = write_json_compact(list(id = vy[j], year = y, r = rr, n0 = n0, dn = dn), file.path(OUT_DIR, "r", y, paste0(vy[j], ".json"))))
+  }
+  write_json_compact(list(year = y, corr = arr(vy)), file.path(OUT_DIR, "r", y, "index.json"))
+  corr_vars_by_year[[as.character(y)]] <- vy
+  cor_store[[as.character(y)]] <- list(X = X, cty = cty, wt = w_y, res = res)
+  cat(y, ":", length(vy), "correlatable questions\n")
+}
+```
+
+# Index and manifest
+
+```{r manifest}
+sections <- unname(LB_SECTIONS[LB_SECTIONS %in% unique(catalogue$section)])
+write_json_compact(list(sections = arr(sections), vars = index_vars), file.path(OUT_DIR, "index.json"))
+
+ctry_json <- list()
+for (k in seq_len(nrow(countries))) {
+  iso <- countries$iso2[k]
+  cyk <- cy_n[country_code == countries$lb_code[k]][order(year)]
+  if (!nrow(cyk)) next
+  ctry_json[[iso]] <- list(name = countries$name[k], iso3 = countries$iso3[k], iso_numeric = countries$iso_numeric[k],
+                           waves = setNames(lapply(seq_len(nrow(cyk)), function(i) list(n = cyk$n[i], year = cyk$year[i])),
+                                            as.character(cyk$year)))
+}
+subgroups_json <- lapply(SUBGROUPS, function(s) list(id = s$id, label = s$label, note = SUBGROUP_NOTES[[s$id]],
+  from = s$from, groups = lapply(s$groups, function(g) list(id = g$id, label = g$label))))
+manifest <- list(
+  schema = "barometer-explorer/2",
+  survey = SURVEY,
+  built = format(Sys.time(), "%Y-%m-%d"),
+  sources = sources,
+  unit_label = SURVEY$unit_label,
+  gaps_note = SURVEY_GAPS_NOTE,
+  waves = lapply(YEARS, function(y) list(id = y, label = as.character(y), years = as.character(y),
+                                         n = sum(cy_n$n[cy_n$year == y]),
+                                         countries = arr(sort(unique(lb$iso[lb$year == y]))))),
+  countries = ctry_json,
+  subgroups = subgroups_json,
+  country_sets = COUNTRY_SETS,
+  default_set = DEFAULT_SET,
+  min_cell_n = MIN_CELL_N,
+  n_questions = length(index_vars),
+  default_trend = "A_001_001"
+)
+write_json_compact(manifest, file.path(OUT_DIR, "manifest.json"))
+```
+
+# Checks
+
+## Every cell adds up, and no cell exceeds its country-year
+
+Percentages over valid respondents sum to 100 (within rounding), unweighted
+counts sum to the valid N, nonresponse shares lie in 0–100, means lie on the
+scale, and no cell has more respondents than its country-year has in
+`LB_TimeSeries_Clean_v1_country_year.csv`.
+
+```{r check-cells}
+N_cy <- setNames(cy_ref$n, paste(cy_ref$year, iso_of[as.character(cy_ref$country_code)]))
+check_cell <- function(e, rec, tag) {
+  bad <- character()
+  if (e$nv > 0) {
+    p <- unlist(e$p); cnt <- unlist(e$c)
+    if (abs(sum(p) - 100) > 0.05 * length(p) + 0.1) bad <- c(bad, paste(tag, "p-sum", sum(p)))
+    if (!is.null(e$c) && sum(cnt) != e$nv) bad <- c(bad, paste(tag, "count-sum"))   # counts: all-respondent cells
+    if (!is.null(e$m)) {
+      lo <- if (rec$type == "continuous") unlist(rec$range)[1] else min(unlist(rec$codes))
+      hi <- if (rec$type == "continuous") unlist(rec$range)[2] else max(unlist(rec$codes))
+      if (e$m < lo - 1e-9 || e$m > hi + 1e-9) bad <- c(bad, paste(tag, "mean-range"))
+    }
+  }
+  if (!is.null(e$q)) { q <- unlist(e$q); if (any(q < 0 | q > 100) || sum(q) > 100.1) bad <- c(bad, paste(tag, "q")) }
+  if (e$n < e$nv) bad <- c(bad, paste(tag, "n<nv"))
+  bad
+}
+problems <- character(); n_cells <- 0
+for (v in names(var_meta)) {
+  rec <- fromJSON(file.path(OUT_DIR, "v", paste0(v, ".json")), simplifyVector = FALSE)
+  for (y in names(rec$est)) {
+    gf <- file.path(OUT_DIR, "g", y, paste0(v, ".json"))
+    grp <- if (file.exists(gf)) fromJSON(gf, simplifyVector = FALSE)$est else list()
+    for (cc in names(rec$est[[y]])) {
+    e <- rec$est[[y]][[cc]]; n_cells <- n_cells + 1
+    problems <- c(problems, check_cell(e, rec, paste(v, y, cc, "all")))
+    if (e$n > N_cy[[paste(y, cc)]]) problems <- c(problems, paste(v, y, cc, "n > country-year N"))
+    for (g in names(grp[[cc]])) {
+      eg <- grp[[cc]][[g]]; n_cells <- n_cells + 1
+      problems <- c(problems, check_cell(eg, rec, paste(v, y, cc, g)))
+      if (eg$n > e$n) problems <- c(problems, paste(v, y, cc, g, "group n > all n"))
+    }
+  }}
+}
+cat(n_cells, "cells checked;", length(problems), "problems\n"); head(problems)
+stopifnot(length(problems) == 0)
+```
+
+## Years and coverage
+
+Each question's years equal the catalog's `years`; no Spain; no value for a
+country-year that was not surveyed; no year outside the 24 survey years (so
+nothing is interpolated).
+
+```{r check-coverage}
+cat_years <- setNames(lapply(strsplit(catalog$years, " "), as.integer), catalog$variable)
+# the catalog was written before fix 4, which set K_004_081 1995 (a 5-point item) to -4
+cat_years$K_004_081 <- setdiff(cat_years$K_004_081, 1995)
+yr_diff <- names(var_meta)[!vapply(names(var_meta), function(v) setequal(var_meta[[v]]$years, intersect(cat_years[[v]], YEARS)), logical(1))]
+yr_diff
+stopifnot(length(yr_diff) == 0)
+surveyed <- paste(cy_ref$year, iso_of[as.character(cy_ref$country_code)])
+cov_bad <- 0
+for (v in names(var_meta)) {
+  rec <- fromJSON(file.path(OUT_DIR, "v", paste0(v, ".json")), simplifyVector = FALSE)
+  keys <- unlist(lapply(names(rec$est), function(y) paste(y, names(rec$est[[y]]))))
+  cov_bad <- cov_bad + sum(!keys %in% surveyed) + sum(!as.integer(names(rec$est)) %in% LB_SURVEY_YEARS)
+}
+man <- fromJSON(file.path(OUT_DIR, "manifest.json"), simplifyVector = FALSE)
+stopifnot(cov_bad == 0, !("ES" %in% names(man$countries)), length(man$countries) == 18,
+          all(vapply(man$waves, function(w) w$id %in% LB_SURVEY_YEARS, logical(1))))
+cat("Coverage OK:", length(var_meta), "questions; years match the catalog; every cell is a surveyed country-year\n")
+```
+
+## Random cells against `lb_cy_share()` and `lb_cy_mean()`, both bases
+
+`LB_functions.R`'s helpers recompute at least 300 random country-year cells. The
+only difference by design: positive codes this site treats as nonresponse
+(listed in `catalogue_review.csv`, e.g. C_001_031 0 "No responde", vote
+intention 92 "Voto secreto") are given code −2 before calling the helpers, which
+otherwise count them as valid. The asked-base value is the browser's formula,
+`p × (1 − Σ nonresponse / 100)`.
+
+```{r check-random}
+set.seed(20260930)
+site_share <- function(cell, rec, success, base) {
+  kk <- unlist(cell$k %||% rec$codes); p <- sum(unlist(cell$p)[kk %in% success])
+  if (base == "asked") p <- p * (1 - sum(unlist(cell$q %||% list(0))) / 100)
+  p
+}
+# lb_cy_share(base = "asked") gives 0% for a country-year where everyone is
+# nonresponse; the site leaves those out (above). The reference does the same.
+drop_nr_only <- function(cy, v) {
+  if (!nrow(all_nr) || !v %in% all_nr$variable) return(cy)
+  z <- all_nr[all_nr$variable == v, ]
+  cy[!paste(cy$year, cy$country_code) %in% paste(z$year, code_of[z$iso2]), ]
+}
+helper_data <- function(v) {
+  x <- lb[[v]]; pnr <- var_meta[[v]]$nr_raw; pnr <- pnr[pnr >= 0]
+  if (length(pnr)) x[x %in% pnr] <- -2L
+  tibble(year = lb$year, country_code = lb$country_code, weight = lb$weight, !!v := x)
+}
+eligible <- names(var_meta)[vapply(var_meta, function(m) m$type != "continuous", logical(1))]
+recheck <- map_dfr(1:400, function(k) {
+  v <- sample(eligible, 1); m <- var_meta[[v]]
+  rec <- fromJSON(file.path(OUT_DIR, "v", paste0(v, ".json")), simplifyVector = FALSE)
+  y <- sample(names(rec$est), 1); cc <- sample(names(rec$est[[y]]), 1); cell <- rec$est[[y]][[cc]]
+  kk <- unlist(cell$k %||% rec$codes)
+  success <- if (length(kk) > 1 && runif(1) < 0.5) sample(kk, 2) else sample(kk, 1)
+  hd <- helper_data(v) |> filter(year == as.integer(y), country_code == code_of[[cc]])
+  ref_v <- lb_cy_share(hd, v, success, base = "valid")$share
+  ref_a <- if (any(hd[[v]] < 0, na.rm = TRUE)) lb_cy_share(hd, v, success, base = "asked")$share else ref_v
+  ref_m <- if (m$type != "nominal" && !is.null(cell$m)) lb_cy_mean(hd, v, range = m$scale)$mean else NA
+  tibble(var = v, year = y, country = cc, k_codes = length(success),
+         d_valid = abs(site_share(cell, rec, success, "valid") - ref_v),
+         d_asked = abs(site_share(cell, rec, success, "asked") - ref_a),
+         d_mean  = if (is.na(ref_m)) 0 else abs(cell$m - ref_m))
+})
+recheck |> summarise(cells = n(), vars = n_distinct(var), max_valid = max(d_valid), max_asked = max(d_asked), max_mean = max(d_mean))
+stopifnot(nrow(recheck) >= 300, all(recheck$d_valid <= 0.051 * recheck$k_codes + 1e-9),
+          all(recheck$d_asked <= 0.101 * recheck$k_codes + 1e-9), all(recheck$d_mean < 0.0006))
+```
+
+## Regional lines equal `lb_region()` for every featured trend
+
+The browser averages country values over a fixed set and shows a year only
+when every member has data. Here the same rule is applied to the published
+files and compared with `lb_region()` (and `allow_missing = TRUE` for the
+unbalanced set). Years listed in `trend_breaks.csv` are left out of trends.
+`pipeline/check_regions.mjs` repeats this with the site's own JavaScript.
+
+```{r check-regions}
+featured <- trend_ind$variable[trend_ind$featured == "1"]
+region_ref <- list(); reg_cmp <- list()
+for (v in featured) {
+  ind <- index_vars[[which(vapply(index_vars, `[[`, "", "id") == v)]]$d
+  rec <- fromJSON(file.path(OUT_DIR, "v", paste0(v, ".json")), simplifyVector = FALSE)
+  brk <- trend_breaks(v, trend_brk)$years
+  hd <- helper_data(v)
+  for (base in if (ind$type == "mean") "mean" else c("valid", "asked")) {
+    cy <- if (base == "mean") lb_cy_mean(hd, v, range = var_meta[[v]]$scale) |> rename(value = mean)
+          else drop_nr_only(lb_cy_share(hd, v, unlist(ind$codes), base = base), v) |> rename(value = share)
+    for (s in COUNTRY_SETS) {
+      ref <- lb_region(cy, value = "value", countries = code_of[s$countries], allow_missing = !s$balanced) |>
+        filter(!is.na(value), !year %in% brk)
+      site <- bind_rows(tibble(year = integer(), site = double(), n_c = integer()), map_dfr(names(rec$est), function(y) {
+        if (as.integer(y) %in% brk) return(NULL)
+        vals <- map_dbl(s$countries, function(cc) {
+          e <- rec$est[[y]][[cc]]; if (is.null(e) || e$nv == 0) return(NA_real_)
+          if (base == "mean") e$m %||% NA_real_ else site_share(e, rec, unlist(ind$codes), base)
+        })
+        if (s$balanced && anyNA(vals)) return(NULL)
+        if (all(is.na(vals))) return(NULL)
+        tibble(year = as.integer(y), site = mean(vals, na.rm = TRUE), n_c = sum(!is.na(vals)))
+      }))
+      j <- full_join(ref, site, by = "year")
+      reg_cmp[[length(reg_cmp) + 1]] <- j |> mutate(var = v, base = base, set = s$id, balanced = s$balanced)
+      region_ref[[length(region_ref) + 1]] <- ref |> mutate(var = v, base = base, set = s$id)
+    }
+  }
+}
+reg_cmp <- bind_rows(reg_cmp)
+reg_cmp |> group_by(base) |> summarise(points = n(), max_diff = max(abs(value - site)), missing = sum(is.na(value) | is.na(site)))
+stopifnot(!anyNA(reg_cmp$value), !anyNA(reg_cmp$site),
+          all(abs(reg_cmp$value - reg_cmp$site) < ifelse(reg_cmp$base == "mean", 0.0006, 0.101)),
+          all(reg_cmp$n_c == reg_cmp$n_countries))
+# n_countries is constant along every balanced line
+stopifnot(all(reg_cmp |> filter(balanced) |> group_by(var, base, set) |> summarise(k = n_distinct(n_countries), .groups = "drop") |> pull(k) == 1))
+write.csv(bind_rows(region_ref), file.path(REVIEW_DIR, "region_reference.csv"), row.names = FALSE)
+reg_cmp |> filter(var == "A_001_001", set == "bal16", base == "valid") |> select(year, value, site, n_countries)
+```
+
+## Benchmarks against published figures
+
+% "democracy is preferable" pooled over every country surveyed that year, don't
+know / no answer in the base (the cleaning notebook's `pooled()`), must be 47.8,
+48.0 and 51.6 for 2018, 2023 and 2024 (published: 48, 48, 52). The site's
+country cells for those years must equal `lb_cy_share(base = "asked")`. The
+crime-victim rate must lie between 22% and 45% in every year it was asked
+(rounded to whole percent, as in the audit notes; 2017 is 21.9%).
+
+```{r check-benchmarks}
+pooled <- function(dat, var, success, years) {
+  x <- as.double(dat[[var]])
+  tibble(year = dat$year, w = dat$weight, x = x) %>%
+    filter(year %in% years, !is.na(x), x >= 0 | x %in% c(-1, -2, -5)) %>%
+    group_by(year) %>% summarise(pct = round(100 * sum(w * (x %in% success)) / sum(w), 1))
+}
+if (all(c(2018, 2023, 2024) %in% YEARS)) {
+  bench <- pooled(lb, "A_001_001", 1, c(2018, 2023, 2024)) %>% mutate(expected = c(47.8, 48.0, 51.6), published = c(48, 48, 52))
+  print(bench)
+  stopifnot(all(bench$pct == bench$expected))
+  rec <- fromJSON(file.path(OUT_DIR, "v", "A_001_001.json"), simplifyVector = FALSE)
+  ref <- drop_nr_only(lb_cy_share(helper_data("A_001_001") |> filter(year %in% c(2018, 2023, 2024)), "A_001_001", 1, base = "asked"), "A_001_001")
+  site <- pmap_dbl(ref, function(year, country_code, n, share) site_share(rec$est[[as.character(year)]][[iso_of[[as.character(country_code)]]]], rec, 1, "asked"))
+  cat("2018/2023/2024 country cells, asked base: max |site - lb_cy_share| =", max(abs(site - ref$share)), "over", nrow(ref), "cells\n")
+  stopifnot(max(abs(site - ref$share)) <= 0.101)
+}
+victim <- pooled(lb |> mutate(v = I_001_001_victim), "v", 1, YEARS) |> rename(pooled_asked = pct) |>
+  left_join(lb[, .(valid = round(100 * sum(weight * (I_001_001_victim == 1L), na.rm = TRUE) / sum(weight[I_001_001_victim >= 0], na.rm = TRUE), 1)),
+               by = year], by = "year")
+victim <- victim |> filter(!is.na(valid))        # 2000: not asked
+victim
+# "22-45%" is the audit's range rounded to whole percent: 2017 is 21.9% (valid) / 21.6% (asked).
+stopifnot(nrow(victim) == length(setdiff(YEARS, 2000)),
+          all(round(victim$valid) >= 22 & round(victim$valid) <= 45),
+          all(round(victim$pooled_asked) >= 22 & round(victim$pooled_asked) <= 45))
+rec <- fromJSON(file.path(OUT_DIR, "v", "I_001_001_victim.json"), simplifyVector = FALSE)
+site_cy <- unlist(lapply(rec$est, function(yy) vapply(yy, function(e) site_share(e, rec, 1, "valid"), 0)))
+summary(site_cy)
+```
+
+## Correlations match `stats::cov.wt`; nothing meaningless is correlated
+
+```{r check-corr}
+set.seed(7)
+corr_check <- map_dfr(names(cor_store), function(y) {
+  cs <- cor_store[[y]]
+  map_dfr(1:20, function(k) {
+    cc <- sample(names(cs$res), 1); rows <- which(cs$cty == cc)
+    j <- sample(ncol(cs$X), 2)
+    ref <- suppressWarnings(tryCatch(cor_reference(cs$X[rows, j[1]], cs$X[rows, j[2]], cs$wt[rows]), error = function(e) NA))
+    tibble(year = y, country = cc, a = colnames(cs$X)[j[1]], b = colnames(cs$X)[j[2]], mine = cs$res[[cc]]$r[j[1], j[2]], ref = ref)
+  })
+}) |> filter(!is.na(mine))
+cat(nrow(corr_check), "pairs compared; max abs diff", signif(max(abs(corr_check$mine - corr_check$ref)), 2), "\n")
+stopifnot(nrow(corr_check) >= 8 * length(YEARS), max(abs(corr_check$mine - corr_check$ref)) < 1e-8)
+all_corr <- unique(unlist(corr_vars_by_year))
+stopifnot(!any(all_corr %in% ADMIN_VARS), !any(all_corr %in% catalogue$variable[catalogue$type == "nominal"]))
+```
+
+## Payload sizes
+
+```{r sizes}
+sizes <- bind_rows(file_sizes)
+gz <- function(paths) vapply(paths, function(p) length(memCompress(readBin(p, "raw", file.size(p)), "gzip")), 0)
+cat("Total:", nrow(sizes), "files,", round(sum(sizes$bytes) / 1e6, 1), "MB\n")
+sizes |> group_by(kind) |> summarise(files = n(), total_MB = round(sum(bytes) / 1e6, 1),
+                                     median_KB = round(median(bytes) / 1e3, 1), max_KB = round(max(bytes) / 1e3, 1))
+big <- sizes |> arrange(desc(bytes)) |> head(8)
+big$gz_KB <- round(gz(ifelse(big$kind == "v", file.path(OUT_DIR, "v", paste0(big$id, ".json")),
+                             file.path(OUT_DIR, big$kind, big$year, paste0(big$id, ".json")))) / 1e3, 1)
+big
+c(index_KB = round(file.size(file.path(OUT_DIR, "index.json")) / 1e3, 1),
+  index_gz_KB = round(gz(file.path(OUT_DIR, "index.json")) / 1e3, 1),
+  manifest_KB = round(file.size(file.path(OUT_DIR, "manifest.json")) / 1e3, 1))
+write.csv(sizes, file.path(REVIEW_DIR, "file_sizes.csv"), row.names = FALSE)
+```
+
+# Publish
+
+All checks passed, so the staged files replace the site's data.
+
+```{r publish}
+for (d in c("v", "g", "r")) unlink(file.path(FINAL_DIR, d), recursive = TRUE)
+for (d in c("v", "g", "r")) stopifnot(file.rename(file.path(OUT_DIR, d), file.path(FINAL_DIR, d)) ||
+                                       file.copy(file.path(OUT_DIR, d), FINAL_DIR, recursive = TRUE))
+for (f in c("manifest.json", "index.json")) file.copy(file.path(OUT_DIR, f), file.path(FINAL_DIR, f), overwrite = TRUE)
+cat("Published to", normalizePath(FINAL_DIR), "\n")
+```
+
+```{r session}
+sessionInfo()
+```

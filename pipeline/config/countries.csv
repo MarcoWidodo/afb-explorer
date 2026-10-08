@@ -1,0 +1,19 @@
+lb_code,iso2,iso3,iso_numeric,name
+32,AR,ARG,032,Argentina
+68,BO,BOL,068,Bolivia
+76,BR,BRA,076,Brazil
+152,CL,CHL,152,Chile
+170,CO,COL,170,Colombia
+188,CR,CRI,188,Costa Rica
+214,DO,DOM,214,Dominican Republic
+218,EC,ECU,218,Ecuador
+222,SV,SLV,222,El Salvador
+320,GT,GTM,320,Guatemala
+340,HN,HND,340,Honduras
+484,MX,MEX,484,Mexico
+558,NI,NIC,558,Nicaragua
+591,PA,PAN,591,Panama
+600,PY,PRY,600,Paraguay
+604,PE,PER,604,Peru
+858,UY,URY,858,Uruguay
+862,VE,VEN,862,Venezuela
