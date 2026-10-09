@@ -52,23 +52,68 @@ export function Checkbox({ checked, onChange, label, hint }) {
 }
 
 /* ── Unit selector (from the manifest) ──
-   A few waves: labelled pills (ABS). Many survey years: a calendar strip with the
-   years without a survey shown as gaps, and a plain select on narrow screens.
+   Afrobarometer: 10 rounds, shown as a compact strip ("R1" … "R10" with the round's fieldwork
+   years) and as a plain select on narrow screens. Calendar-year surveys (LB) keep the year strip.
    `available`: units with data for the current question (others are disabled). */
-export function WaveSelector({ value, onChange, waves, available }) {
+export function WaveSelector({ value, onChange, available, label }) {
   const { manifest } = useData()
-  const list = waves ? manifest.waves.filter(w => waves.includes(w.id)) : manifest.waves
-  if (manifest.waves.length > 8) return <YearSelector value={value} onChange={onChange} available={available} />
+  if (manifest.unit_label === 'Year') return <YearSelector value={value} onChange={onChange} available={available} />
+  return <RoundSelector value={value} onChange={onChange} available={available} label={label} />
+}
+
+export function RoundSelector({ value, onChange, available, label = 'Round' }) {
+  const { manifest } = useData()
+  const avail = available ? new Set(available) : null
+  const nAvail = avail ? manifest.waves.filter(w => avail.has(w.id)).length : manifest.waves.length
+  const cur = manifest.waves.find(w => w.id === value)
   return (
-    <div className="wave-selector" role="radiogroup" aria-label="Survey wave">
-      {list.map(w => (
-        <button key={w.id} role="radio" aria-checked={value === w.id} onClick={() => onChange(w.id)}
-                disabled={available ? !available.includes(w.id) : false}
-                className={`wave-pill${value === w.id ? ' active' : ''}`}>
-          <span className="wave-pill-label">{w.label}</span>
-          <span className="wave-pill-years">{w.years}</span>
-        </button>
-      ))}
+    <div className="round-picker">
+      <div className="year-picker-head">
+        <span className="year-picker-label">{label}</span>
+        <span className="year-picker-value">{cur ? `${cur.label}` : '—'}</span>
+        <span className="year-picker-hint">
+          {cur ? `fieldwork ${cur.years.replace('/', '–')}, ${cur.countries.length} countries · ` : ''}
+          {avail ? `asked in ${nAvail} of ${manifest.waves.length} rounds` : `${manifest.waves.length} rounds`}
+        </span>
+      </div>
+      <div className="round-strip" role="radiogroup" aria-label={label}>
+        {manifest.waves.map(w => (
+          <button key={w.id} role="radio" aria-checked={value === w.id} className={`round-cell${value === w.id ? ' active' : ''}`}
+                  disabled={avail ? !avail.has(w.id) : false} onClick={() => onChange(w.id)}
+                  title={avail && !avail.has(w.id) ? `${w.label} (${w.years}): not asked` : `${w.label}: fieldwork ${w.years}, ${w.countries.length} countries`}>
+            <span className="round-cell-label">{w.label}</span>
+            <span className="round-cell-years">{w.years}</span>
+          </button>
+        ))}
+      </div>
+      <div className="round-select-wrap">
+        <div className="ts-select-wrap">
+          <select className="ts-select" value={value ?? ''} onChange={e => onChange(Number(e.target.value))} aria-label={label}>
+            {[...manifest.waves].reverse().map(w => (
+              <option key={w.id} value={w.id} disabled={avail ? !avail.has(w.id) : false}>
+                {w.label} ({w.years}){avail && !avail.has(w.id) ? ' — not asked' : ''}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={14} className="ts-select-icon" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── Which questions a single-round view lists: the harmonised battery, or every
+   question in that round's own file (scope B) ── */
+export function SourceToggle({ value, onChange, unit, nBattery, nRound }) {
+  const { manifest } = useData()
+  if (!manifest.round_files) return null
+  return (
+    <div className="source-toggle">
+      <Segmented label="Questions" value={value} onChange={onChange}
+        options={[{ value: 'battery', label: `Harmonised${nBattery != null ? ` (${nBattery})` : ''}`, title: 'Items harmonised across rounds; comparable over time' },
+                  { value: 'round', label: `All in R${unit ?? ''}${nRound != null ? ` (${nRound})` : ''}`, title: `Every question in the round ${unit ?? ''} file, with its own answer codes` }]}
+        hint={value === 'battery' ? 'Items harmonised across rounds, with the same codes in every round.'
+          : `Every question in the R${unit ?? ''} file, with that round's own wording and codes.`} />
     </div>
   )
 }
@@ -133,7 +178,7 @@ export function IndicatorControl({ allowMean, metric, onMetric, codes, labels, s
       <div className="mode-toggle">
         <button className={`mode-btn${metric === 'share' ? ' active' : ''}`} onClick={() => onMetric('share')}>% choosing</button>
         <button className={`mode-btn${metric === 'mean' ? ' active' : ''}`} onClick={() => onMetric('mean')} disabled={!allowMean}
-                title={allowMean ? '' : 'Means are offered only for interval-like scales (0–10, 1–10) and numeric questions'}>Mean</button>
+                title={allowMean ? '' : 'Means are offered only for interval-like scales (7+ points) and numeric questions; Afrobarometer scales are 3–5 points, so shares are shown'}>Mean</button>
       </div>
       {metric === 'share' ? (
         <>
@@ -165,7 +210,7 @@ export function BaseControl({ value, onChange }) {
     <Segmented label="Denominator" value={value} onChange={onChange}
       options={[{ value: 'valid', label: 'Valid answers', title: `${nr} excluded` },
                 { value: 'asked', label: 'All asked', title: `${nr} kept in the base (published-report style)` }]}
-      hint={value === 'valid' ? `${nr} excluded from the base.` : `${nr} kept in the base, as in ${manifest.survey.short}'s published reports.`} />
+      hint={value === 'valid' ? `${nr} excluded from the base.` : `${nr} kept in the base, as in ${manifest.survey.short}'s published reports; not applicable and not asked are never counted.`} />
   )
 }
 

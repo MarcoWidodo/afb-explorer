@@ -1,9 +1,32 @@
-# Engine changes (port back to ABS Explorer)
+# Engine changes (port back to ABS and LB Explorers)
 
 The LB Explorer was seeded from `MarcoWidodo/abs-explorer@9c4ed87` (branch `v2`). Survey-specific code
 (`pipeline/R/00_config.R`, `10_catalogue.R`, `40_indicators.R`, `pipeline/config/`, the views' data loading,
 text and colour tokens) is expected to differ. This file lists changes to **shared engine code** that
 ABS could adopt. Each entry says whether it is backward compatible.
+
+## AB Explorer (seeded from `MarcoWidodo/lb-explorer@2a9d59f`, 2026-10-08)
+
+Changes to shared engine code made for Afrobarometer. Survey-specific files (`pipeline/R/00_config.R`,
+`10_catalogue.R`, `40_indicators.R`, `pipeline/config/`, views' text) are expected to differ.
+
+| # | File | Change | ABS / LB impact |
+|---|---|---|---|
+| A1 | `src/lib/stats.js` | `regionValue(byCountry, members, allowMissing, yearOf)`: optional `yearOf(member)` returns the member's fieldwork year; the point then carries `year_mid` (R's `median()`), `year_min`, `year_max`. New `median()`, `roundLabel()`. | Compatible. ABS can use it for its waves (restores v2's per-country years for regional points). |
+| A2 | `src/lib/trend.js` (new) | Trend breaks **between adjacent units** (`tb.breaks = [[a, b], …]`) split a line into segments; `tb.start` drops earlier units. `trendPositions()` mirrors `trend_positions()` in R and is shared by the view and `check_regions.mjs`. Replaces LB's left-out break years (`tb.years`). | Schema change. LB's break years map to pairs (`1998` left out → `[1997, 1998], [1998, 2000]`, or `start`). |
+| A3 | `src/views/TimeSeriesExplorer.jsx` | Hybrid time axis restored from ABS v2: country points at `countries[cc].waves[u].year`, regional points at the members' median year with a round label (`pointLabel`, drawn above the bold series by `LineChart`); tooltips show round label and fieldwork year; tidy CSV has `round` and `year`. | ABS: the same logic serves waves. LB: unit = year, so x = unit as before. |
+| A4 | `src/context/DataProvider.jsx`, `CountryPicker.jsx`, `index.css` | **Colours by selection slot** (`slotColor(i)`, 16 `--slot-*` tokens; the first 8 most distinct) instead of fixed `--country-XX` tokens; outside a selection a country takes its subregion colour (`--region-*`). `countryColor(iso, selection)`. | Recommended for any survey with more than ~16 countries; ABS/LB can keep fixed tokens. |
+| A5 | `src/components/shared/Controls.jsx` + CSS | `RoundSelector`: a compact 10-cell strip ("R1" … with fieldwork years) and a `<select>` under 760 px; `WaveSelector` uses the calendar `YearSelector` only when `unit_label === 'Year'` (was: more than 8 units). `SourceToggle` switches between the harmonised battery and a round's own questions. | Compatible (ABS 6 waves would also get the strip; set the threshold as wished). |
+| A6 | `pipeline/build_site_data.Rmd`, `src/context/DataProvider.jsx` | **Round browser (scope B)** on the LB layout: round-file questions are catalogue entries with one unit (`id` = `R7_Q28`), so `v/`, `g/<u>/`, `r/<u>/` serve them unchanged; their catalogue is `rounds/<u>.json`. Records carry `units` (was `years`) and entries `u` (was `y`); `unitRecord()`/`useUnitVariable()` replace `yearRecord()`/`useYearVariable()`. | Schema rename; ABS could serve its wave files the same way. |
+| A7 | `pipeline/R/30_correlations.R` | `weighted_cross_cor(X, Y, w)`: rectangular weighted pairwise correlations (every column of X against every column of Y); `weighted_pairwise_cor(X, w)` is now `weighted_cross_cor(X, X, w)`. Round-file questions are correlated with the battery only. The Correlations view looks a pair up in either question's file. | Compatible. |
+| A8 | `pipeline/build_site_data.Rmd` | Means (`m`, `sd`, `se`) are written only where a mean is allowed (`mean_allowed()`: continuous, or 7+ point scales), so no short-scale or R10 statement-item mean exists in the data at all. | Smaller files; views already only show allowed means. |
+| A9 | `src/components/charts/ChoroplethMap.jsx` | `small` prop: listed island/small states always get a marker (AB: CPV, STP, COM, MUS, SYC, GMB, SWZ, LSO), besides anything under 60 px². | Compatible. |
+| A10 | `pipeline/build_site_data.Rmd` | Countries keyed by **ISO3** throughout (manifest, files, CSS), because Namibia's ISO2 code "NA" is read as missing by R and pandas defaults. CSV config is read with `na.strings = character()`. | Recommended. |
+| A12 | `src/index.css`, `TimeSeriesExplorer.jsx` | Fix: numeric table headers (`.corr-th-num`) were left-aligned over right-aligned numbers, because `.corr-table thead th` outranked the class. Time-axis ticks adapt to the span (every 5, 2 or 1 years). | Bug fix; port to ABS and LB. |
+| A13 | `pipeline/R/30_correlations.R` | Fix: columns are centred and scaled before the one-pass weighted sums. With large values relative to their spread (numeric items such as counts or amounts) the sums lost precision through cancellation (r off by ~3e-8 against `cov.wt` on a synthetic case; 4e-15 after). r is invariant to the transform. | Bug fix; port to ABS and LB (their items are small-valued, so the effect there was negligible). |
+| A11 | `pipeline/build_site_data.Rmd` | Round files are read without their string columns (open text; R6 has undecodable bytes there) and their ID column on its own; rows are asserted to line up with the merge (ID, country, weight). | AB-specific, but the pattern applies to any raw-file browser. |
+
+## LB Explorer (seeded from `MarcoWidodo/abs-explorer@9c4ed87`)
 
 | # | File | Change | ABS impact |
 |---|---|---|---|

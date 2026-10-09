@@ -1,5 +1,1 @@
-variable,type,note
-A_001_001,nominal,"Three answers that are not an ordered scale (democracy / authoritarianism / doesn't matter): no mean"
-A_013_031,nominal,"Second most important goal for the country: an unordered list (order / say in decisions / prices / free speech), as A_013_021"
-A_008_003_141,nominal,"Best way to make the country progress: an unordered list (vote / vote and protest / protest / nothing)"
-S_003,exclude,"Birthdate stored as a YYYYMMDD number: not a question; age (S_002) is shown instead"
+round,variable,type,note

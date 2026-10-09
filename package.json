@@ -1,5 +1,5 @@
 {
-  "name": "barometer-explorer-lb",
+  "name": "barometer-explorer-ab",
   "private": true,
   "version": "2.0.0",
   "type": "module",
@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "geo": "node scripts/build-geo.mjs"
+    "geo": "node scripts/build-geo.mjs -26 64 -36 38"
   },
   "dependencies": {
     "d3-ease": "^3.0.1",

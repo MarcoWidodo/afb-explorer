@@ -1,125 +1,151 @@
 # =============================================================================
 # 00_config.R: everything survey-specific lives here (plus pipeline/config/*.csv)
 #
-# Latinobarómetro edition of the barometer-explorer engine (seeded from the
-# ABS Explorer v2 pipeline). The estimation code in 20–50_*.R is unchanged
-# survey-agnostic engine code; LB-specific rules sit here and in 10_catalogue.R.
+# Afrobarometer edition of the barometer-explorer engine (seeded from the
+# Latinobarómetro Explorer v1 pipeline, lb-explorer@2a9d59f). The estimation
+# code in 20–50_*.R is survey-agnostic engine code; AB-specific rules sit here
+# and in 10_catalogue.R / 40_indicators.R.
 # =============================================================================
 
 SURVEY <- list(
-  id          = "lb",
-  name        = "Latinobarómetro",
-  short       = "LB",
-  region      = "Latin America",
-  url         = "https://www.latinobarometro.org",
+  id          = "ab",
+  name        = "Afrobarometer",
+  short       = "AB",
+  region      = "Africa",
+  url         = "https://www.afrobarometer.org",
   attribution = paste(
-    "Latinobarómetro is produced by the Corporación Latinobarómetro, a non-profit organisation",
-    "based in Santiago, Chile."),
+    "Afrobarometer is a pan-African, non-partisan survey research network that conducts public attitude",
+    "surveys on democracy, governance, the economy and society in African countries."),
+  # instructions rule 11: AB's citation form
   citation    = paste(
-    "Corporación Latinobarómetro, Latinobarómetro 1995–2024 (time-series merge), www.latinobarometro.org.",
-    "Cleaned and harmonised for this site from LB_TimeSeries_Clean_v1."),
-  unit_label  = "Year",
-  nr_text     = "Don't know / no answer",
+    "Afrobarometer Data, 45 countries, Rounds 1–10, 1999–2025, available at http://www.afrobarometer.org.",
+    "Harmonised for this site from AB_HarmonizedMerge_v1 (rounds 1–10) and the ten round files."),
+  unit_label  = "Round",
+  nr_text     = "Don't know / refused",
   contact     = "widodomarco@gmail.com",
-  # shown as a banner on every page until Corporación Latinobarómetro agrees to public release
+  # shown as a banner on every page until Afrobarometer agrees to a public release
   preview_notice = paste(
-    "Private preview for the research team. Latinobarómetro's terms prohibit republishing its data on other websites;",
-    "do not share this site publicly without the Corporación Latinobarómetro's permission.")
+    "Private preview for the research team. Afrobarometer data are copyrighted, and its data-use terms do not cover",
+    "republishing aggregates on another website; do not share this site publicly without Afrobarometer's permission.")
 )
 
 # ---- Paths -------------------------------------------------------------------
-# LB_DATA_DIR: the "Latinobarometro Data" folder, holding LB_TimeSeries_Clean_v1.sav,
-# time-series-harmonization-crosswalk.xlsx and "Data Cleaning/" (LB_functions.R,
-# the variable catalog and the country-year table). Downloaded locally, not
-# iCloud placeholders. Set with Sys.setenv(LB_DATA_DIR = "...") before knitting.
-DATA_DIR     <- Sys.getenv("LB_DATA_DIR", unset = "~/Desktop/Larry RA/Latinobarometro Data")
-CLEAN_FILE   <- file.path(DATA_DIR, "LB_TimeSeries_Clean_v1.sav")
-CLEANING_DIR <- file.path(DATA_DIR, "Data Cleaning")
-LB_FUNCTIONS <- file.path(CLEANING_DIR, "LB_functions.R")
-CATALOG      <- file.path(CLEANING_DIR, "LB_TimeSeries_Clean_v1_variable_catalog.csv")
-COUNTRY_YEAR <- file.path(CLEANING_DIR, "LB_TimeSeries_Clean_v1_country_year.csv")
-CROSSWALK    <- file.path(DATA_DIR, "time-series-harmonization-crosswalk.xlsx")
+# AB_DATA_DIR: the "Afrobarometer Data" folder, holding AB_HarmonizedMerge_v1.sav,
+# Wave 1.sav … Wave 10.sav and "Data Cleaning/" (AB_functions.R, the variable
+# catalog, the country-round table, the crosswalk). Downloaded locally, not
+# iCloud placeholders. Set with Sys.setenv(AB_DATA_DIR = "...") before knitting.
+DATA_DIR      <- Sys.getenv("AB_DATA_DIR", unset = "~/Desktop/Larry RA/Afrobarometer Data")
+MERGE_FILE    <- file.path(DATA_DIR, "AB_HarmonizedMerge_v1.sav")
+CLEANING_DIR  <- file.path(DATA_DIR, "Data Cleaning")
+AB_FUNCTIONS  <- file.path(CLEANING_DIR, "AB_functions.R")
+CATALOG       <- file.path(CLEANING_DIR, "AB_HarmonizedMerge_v1_variable_catalog.csv")
+COUNTRY_ROUND <- file.path(CLEANING_DIR, "AB_HarmonizedMerge_v1_country_round.csv")
+CROSSWALK     <- file.path(CLEANING_DIR, "AB_Variable_Harmonization_Crosswalk.xlsx")
+BENCHMARKS    <- file.path(CLEANING_DIR, "AB_merge_audit_benchmarks.csv")
+ROUND_FILE    <- function(r) file.path(DATA_DIR, sprintf("Wave %d.sav", r))
+# The final merge (not the 2026-10-04 draft). The build refuses any other file.
+MERGE_MD5     <- "4808543fd3dc58f8e2e8cd52c3ca915e"
 
 CONFIG_DIR <- file.path(PIPELINE_DIR, "config")
 OUT_DIR    <- file.path(PIPELINE_DIR, "..", "public", "data")   # site data
 REVIEW_DIR <- file.path(PIPELINE_DIR, "output")                 # review tables
 
-# Build only some years (for measuring payload size on a subset). Empty = all.
-BUILD_YEARS <- as.integer(strsplit(Sys.getenv("LB_BUILD_YEARS", ""), "[, ]+")[[1]])
+# Build only some rounds (for testing or measuring payload size). Empty = all.
+BUILD_ROUNDS <- as.integer(strsplit(Sys.getenv("AB_BUILD_ROUNDS", ""), "[, ]+")[[1]])
+# Skip the round-file browser (scope B) for a quick harmonised-only build.
+SKIP_ROUND_FILES <- identical(Sys.getenv("AB_SKIP_ROUND_FILES"), "1")
 
-# ---- Units: survey years ---------------------------------------------------------
-# One unit per survey year; the unit id is the year itself. LB_SURVEY_YEARS comes
-# from LB_functions.R. No survey in 1999, 2012, 2014, 2019, 2021, 2022.
-SURVEY_GAPS_NOTE <- "No surveys in 1999, 2012, 2014, 2019, 2021–22."
-WEIGHT_VAR <- "weight"        # = X_020, mean 1 within each country-year
+# ---- Units: rounds ---------------------------------------------------------------
+# One unit per Afrobarometer round (ids 1–10). Countries within a round were surveyed in
+# different calendar years; every country-round carries its own fieldwork year (the
+# merge's `year`, the median interview year; R1 from AB Working Paper 98), and the
+# time axis is hybrid (instructions rule 5).
+ROUNDS <- 1:10
+WEIGHT_VAR <- "weight"        # EA-level within-country weight in every round (decision 3)
 
-# ---- Variables that are never shown (identifiers, weights, design) -------------
-ADMIN_VARS <- c("resp_id", "year", "country_code", "country", "iso3", "weight",
-                "X_003", "X_004", "X_008")
+# ---- Harmonised variables that are never shown (identifiers, weights, design) --
+ADMIN_VARS <- c("resp_id", "round", "country_code", "iso3", "country", "subregion", "respno",
+                "year", "date_interview", "weight", "weight_hh")
 
-# ---- Subgroups --------------------------------------------------------------------
+# ---- Subgroups (from the merge, so identical in every round) -----------------------
 SUBGROUPS <- list(
-  list(id = "gender", label = "Gender", source = "S_001",
+  list(id = "gender", label = "Gender", source = "gender",
        groups = list(list(id = "men",   label = "Men",   codes = 1),
                      list(id = "women", label = "Women", codes = 2))),
-  list(id = "age", label = "Age", source = "S_002",
+  list(id = "age", label = "Age", source = "age",
        groups = list(list(id = "age18", label = "Under 30", range = c(0, 29)),
                      list(id = "age30", label = "30–44",    range = c(30, 44)),
                      list(id = "age45", label = "45–59",    range = c(45, 59)),
                      list(id = "age60", label = "60+",      range = c(60, 120)))),
-  list(id = "edu", label = "Education", source = "S_101",
-       groups = list(list(id = "edu_low",  label = "Primary or less",          codes = 1:3),
-                     list(id = "edu_mid",  label = "Secondary or technical",   codes = 4:5),
-                     list(id = "edu_high", label = "Higher (some or complete)", codes = 6:7))),
-  # X_008 is size of town (8 bands), asked 2001-2024 only. Marco, 2026-09-30:
-  # three groups instead of urban/rural, which LB does not record.
-  list(id = "town", label = "Town size", source = "X_008", from = 2001,
-       groups = list(list(id = "town_cap",   label = "Capital city",         codes = 8),
-                     list(id = "town_big",   label = "Other city 100,000+",  codes = 7),
-                     list(id = "town_small", label = "Town under 100,000",   codes = 1:6)))
+  list(id = "edu", label = "Education", source = "education4",
+       groups = list(list(id = "edu_none", label = "No formal schooling", codes = 0),
+                     list(id = "edu_prim", label = "Primary",             codes = 1),
+                     list(id = "edu_sec",  label = "Secondary",           codes = 2),
+                     list(id = "edu_post", label = "Post-secondary",      codes = 3))),
+  list(id = "urban", label = "Urban / rural", source = "urban_rural",
+       groups = list(list(id = "urban", label = "Urban", codes = 1),
+                     list(id = "rural", label = "Rural", codes = 2)))
 )
 SUBGROUP_NOTES <- list(
-  edu  = "Education from S_101 (7 codes): 1–3 primary or less, 4–5 secondary or technical, 6–7 higher. In 2016 the merge's recode of S_101 differs from the wave file for about 4% of respondents.",
-  town = "Town size from X_008, asked 2001–2024 only (and not in one country in 2020). Capital city = code 8; other city of 100,000+ = code 7; towns under 100,000 = codes 1–6."
+  age   = "Age in years from the merge's age (Q1 in most rounds).",
+  edu   = "Education in four groups from the merge's education4: no formal schooling; primary (informal, some or completed primary); secondary (some or completed); post-secondary (any).",
+  urban = "Urban or rural primary sampling unit, as recorded by Afrobarometer (URBRUR)."
 )
 
 MIN_CELL_N <- 30   # cells with fewer valid respondents are written but flagged; the UI hides them
 
-# ---- Fixed country sets for regional averages ----------------------------------
-# Regional values are the unweighted mean of country estimates (each country
-# counts equally) and are only shown for years in which EVERY member has data,
-# as lb_region() does. The first three are LB_functions.R's sets; the three
-# subregions (Marco, 2026-09-30) are balanced over 1996-2024 (Southern Cone: 1995-2024).
+# ---- Fixed country sets for regional averages (ISO3) ---------------------------
+# Regional values are the unweighted mean of country estimates (each country counts
+# equally) and are shown only for rounds in which EVERY member has data, as
+# ab_region() does. `ab` names the AB_functions.R set each must equal.
 COUNTRY_SETS <- list(
-  list(id = "bal16", label = "16 countries (all but Dominican Rep. and Nicaragua)", short = "16-country average",
-       lb = "LB_SET_BAL16", span = "1996–2024", balanced = TRUE,
-       countries = c("AR", "BO", "BR", "CL", "CO", "CR", "EC", "SV", "GT", "HN", "MX", "PA", "PY", "PE", "UY", "VE")),
-  list(id = "bal17", label = "17 countries (all but Nicaragua), from 2004", short = "17-country average",
-       lb = "LB_SET_BAL17_04", span = "2004–2024", balanced = TRUE,
-       countries = c("AR", "BO", "BR", "CL", "CO", "CR", "DO", "EC", "SV", "GT", "HN", "MX", "PA", "PY", "PE", "UY", "VE")),
-  list(id = "set1995", label = "8 countries surveyed in 1995", short = "8-country average",
-       lb = "LB_SET_1995", span = "1995–2024", balanced = TRUE,
-       countries = c("AR", "BR", "CL", "MX", "PY", "PE", "UY", "VE")),
-  list(id = "mxca", label = "Mexico & Central America (6)", short = "Mexico & Central America",
-       span = "1996–2024", balanced = TRUE, note = "Nicaragua (not surveyed 2023–24) and the Dominican Republic (from 2004) are left out so the set is balanced.",
-       countries = c("MX", "GT", "SV", "HN", "CR", "PA")),
-  list(id = "andes", label = "Andean countries (5)", short = "Andean average",
-       span = "1996–2024", balanced = TRUE,
-       countries = c("BO", "CO", "EC", "PE", "VE")),
-  list(id = "scone", label = "Southern Cone + Brazil (5)", short = "Southern Cone + Brazil",
-       span = "1995–2024", balanced = TRUE,
-       countries = c("AR", "BR", "CL", "PY", "UY")),
-  # Costa Rica and Panama have no armed forces; in most years confidence in the armed forces
-  # (H_002_161) was not asked there, so a balanced line over 16 countries exists in only 4 years.
-  list(id = "bal14af", label = "14 countries with armed forces (the 16 minus Costa Rica, Panama)", short = "14-country average",
-       span = "1996–2024", balanced = TRUE, note = "For confidence in the armed forces (H_002_161): Costa Rica and Panama have no army, and in most years the question was not asked there.",
-       countries = c("AR", "BO", "BR", "CL", "CO", "EC", "SV", "GT", "HN", "MX", "PY", "PE", "UY", "VE")),
-  list(id = "all18", label = "All countries surveyed that year (unbalanced)", short = "All surveyed (unbalanced)",
-       lb = "LB_SET_ALL18", span = "1995–2024", balanced = FALSE,
-       note = "Membership changes over time (8 countries in 1995, Dominican Republic from 2004, no Nicaragua 2023–24), which can move the line by itself. The number of countries is shown for every point.",
-       countries = c("AR", "BO", "BR", "CL", "CO", "CR", "DO", "EC", "SV", "GT", "HN", "MX", "NI", "PA", "PY", "PE", "UY", "VE"))
+  list(id = "r3", label = "17 countries surveyed in every round since R3", short = "17-country average",
+       ab = "AB_SET_R3", span = "R3–R10 (2005–2025)", balanced = TRUE,
+       note = "The merge's default set. Madagascar (not surveyed in R8) is not in it."),
+  list(id = "r1", label = "12 countries surveyed in every round since R1", short = "12-country average",
+       ab = "AB_SET_R1", span = "R1–R10 (1999–2025)", balanced = TRUE),
+  list(id = "r2", label = "16 countries surveyed in every round since R2", short = "16-country average",
+       ab = "AB_SET_R2", span = "R2–R10 (2002–2025)", balanced = TRUE),
+  list(id = "r4", label = "18 countries surveyed in every round since R4", short = "18-country average",
+       ab = "AB_SET_R4", span = "R4–R10 (2008–2025)", balanced = TRUE),
+  list(id = "r6", label = "28 countries surveyed in every round since R6 (AB's trend set)", short = "28-country average",
+       ab = "AB_SET_R6", span = "R6–R10 (2014–2025)", balanced = TRUE,
+       note = "The fixed 28-country set Afrobarometer uses for its own trend figures (Policy Paper 106)."),
+  list(id = "r6_west", label = "West Africa (11 of the 28)", short = "West Africa (11)",
+       ab = "AB_SET_R6_WEST", span = "R6–R10 (2014–2025)", balanced = TRUE),
+  list(id = "r6_southern", label = "Southern Africa (9 of the 28)", short = "Southern Africa (9)",
+       ab = "AB_SET_R6_SOUTHERN", span = "R6–R10 (2014–2025)", balanced = TRUE),
+  list(id = "r6_east", label = "East Africa (4 of the 28)", short = "East Africa (4)",
+       ab = "AB_SET_R6_EAST", span = "R6–R10 (2014–2025)", balanced = TRUE),
+  list(id = "r6_north", label = "North Africa (2 countries: Morocco, Tunisia)", short = "North Africa (2 countries)",
+       ab = "AB_SET_R6_NORTH", span = "R6–R10 (2014–2025)", balanced = TRUE,
+       note = "Only 2 countries: an average of two country lines, not a regional estimate."),
+  list(id = "r6_central", label = "Central Africa (2 countries: Cameroon, Gabon)", short = "Central Africa (2 countries)",
+       ab = "AB_SET_R6_CENTRAL", span = "R6–R10 (2014–2025)", balanced = TRUE,
+       note = "Only 2 countries: an average of two country lines, not a regional estimate."),
+  list(id = "all", label = "All countries surveyed in the round (unbalanced)", short = "All surveyed (unbalanced)",
+       span = "R1–R10 (1999–2025)", balanced = FALSE,
+       note = "Membership changes from round to round (12 countries in R1, 34–39 from R5), which can move the line by itself. The number of countries is shown for every point.")
 )
-DEFAULT_SET <- "bal16"
+DEFAULT_SET <- "r3"
+
+# ---- Round files (scope B: every question in every round) ------------------------
+# Columns that are identifiers, sampling design, interview administration, weights or
+# AB's own convenience flags: never shown as questions. Matched case-insensitively
+# against the whole variable name.
+ROUND_ADMIN_NAME_RX <- paste0("^(", paste(c(
+  "respno", "refnumb", "casenumb", "sbjnum", "intvno", "identity",
+  "country", "country_.*", "country\\..*", "urbrur", "urbrur_cond", "region", "region_.*", "district",
+  "location\\..*", "ea_?code", "ea_id", "psu", "strata", "backchk", "thisint", "prevint", "calls",
+  "hholdse\\d+", "dateintr", "strtime", "endtime", "length", "length_int",
+  "withinwt", "withinwt_.*", "acrosswt", "combinwt", "combinwt_.*", "africawt", "afcombwt",
+  "filter_\\$", "r\\d+\\.only", "r\\d.*ctry", "r4\\.less\\.mad", "r8part", "r\\d+(\\.r\\d+)+\\.only",
+  ".*\\.africa\\.only", ".*_cond", "age_v.*"), collapse = "|"), ")$")
+# Variable labels that mark interview administration or the interviewer's own details.
+ROUND_ADMIN_LABEL_RX <- paste0(
+  "interviewer'?s? (number|id|age|gender|sex|home|language|education|urban|rural|name)|",
+  "^(q\\d+[a-z]?\\.\\s*)?(date|time) (of|interview)|length of interview|duration of interview|",
+  "reason for unsuccessful call|number of calls|household (number|selection)|^(q\\d+[a-z]?\\.\\s*)?respondent number")
 
 # ---- Continuous variables: histogram bins -------------------------------------
 N_BINS <- 10

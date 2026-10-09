@@ -1,19 +1,46 @@
-lb_code,iso2,iso3,iso_numeric,name
-32,AR,ARG,032,Argentina
-68,BO,BOL,068,Bolivia
-76,BR,BRA,076,Brazil
-152,CL,CHL,152,Chile
-170,CO,COL,170,Colombia
-188,CR,CRI,188,Costa Rica
-214,DO,DOM,214,Dominican Republic
-218,EC,ECU,218,Ecuador
-222,SV,SLV,222,El Salvador
-320,GT,GTM,320,Guatemala
-340,HN,HND,340,Honduras
-484,MX,MEX,484,Mexico
-558,NI,NIC,558,Nicaragua
-591,PA,PAN,591,Panama
-600,PY,PRY,600,Paraguay
-604,PE,PER,604,Peru
-858,UY,URY,858,Uruguay
-862,VE,VEN,862,Venezuela
+iso3,iso2,iso_numeric,name,subregion,small
+AGO,AO,024,Angola,Southern,0
+BDI,BI,108,Burundi,East,0
+BEN,BJ,204,Benin,West,0
+BFA,BF,854,Burkina Faso,West,0
+BWA,BW,072,Botswana,Southern,0
+CIV,CI,384,Côte d'Ivoire,West,0
+CMR,CM,120,Cameroon,Central,0
+COG,CG,178,Congo-Brazzaville,Central,0
+COM,KM,174,Comoros,East,1
+CPV,CV,132,Cabo Verde,West,1
+DZA,DZ,012,Algeria,North,0
+EGY,EG,818,Egypt,North,0
+ETH,ET,231,Ethiopia,East,0
+GAB,GA,266,Gabon,Central,0
+GHA,GH,288,Ghana,West,0
+GIN,GN,324,Guinea,West,0
+GMB,GM,270,Gambia,West,1
+GNB,GW,624,Guinea-Bissau,West,0
+KEN,KE,404,Kenya,East,0
+LBR,LR,430,Liberia,West,0
+LSO,LS,426,Lesotho,Southern,1
+MAR,MA,504,Morocco,North,0
+MDG,MG,450,Madagascar,East,0
+MLI,ML,466,Mali,West,0
+MOZ,MZ,508,Mozambique,Southern,0
+MRT,MR,478,Mauritania,North,0
+MUS,MU,480,Mauritius,East,1
+MWI,MW,454,Malawi,Southern,0
+NAM,NA,516,Namibia,Southern,0
+NER,NE,562,Niger,West,0
+NGA,NG,566,Nigeria,West,0
+SDN,SD,729,Sudan,North,0
+SEN,SN,686,Senegal,West,0
+SLE,SL,694,Sierra Leone,West,0
+STP,ST,678,São Tomé and Príncipe,West,1
+SWZ,SZ,748,Eswatini,Southern,1
+SYC,SC,690,Seychelles,East,1
+TCD,TD,148,Chad,Central,0
+TGO,TG,768,Togo,West,0
+TUN,TN,788,Tunisia,North,0
+TZA,TZ,834,Tanzania,East,0
+UGA,UG,800,Uganda,East,0
+ZAF,ZA,710,South Africa,Southern,0
+ZMB,ZM,894,Zambia,Southern,0
+ZWE,ZW,716,Zimbabwe,Southern,0

@@ -7,7 +7,8 @@
           p_asked = p_valid × (1 − Σ nonresponse % / 100)
      2. sums the % of the response codes the user selects
      3. averages country estimates into a regional value (each country counts
-        equally; only when every member of the set has data)
+        equally; only when every member of the set has data) and places it at the
+        median fieldwork year of those countries (the hybrid time axis)
      4. turns r and N into a two-sided p-value (t-test, df = N − 2)
    ───────────────────────────────────────────────────────────── */
 
@@ -73,18 +74,41 @@ export function cellDistribution(cell, rec, base = 'valid') {
 
 /**
  * Equal-weight average of country values; null unless every member has a value
- * (as lb_region()). With allowMissing (an unbalanced set), the average of the
+ * (as ab_region()). With allowMissing (an unbalanced set), the average of the
  * members that have a value; n_countries says how many.
+ * yearOf(member) (optional): the member's fieldwork year in this round. The point is then
+ * placed at the median fieldwork year of the members averaged (year_mid) and labelled with
+ * their year range, as ab_region() does for the hybrid time axis.
  */
-export function regionValue(byCountry, members, allowMissing = false) {
-  let vals = members.map(m => byCountry[m])
-  if (allowMissing) vals = vals.filter(v => v != null && v.value != null)
-  if (!vals.length || vals.some(v => v == null || v.value == null)) return null
+export function regionValue(byCountry, members, allowMissing = false, yearOf = null) {
+  let have = members.filter(m => byCountry[m] != null && byCountry[m].value != null)
+  if (!have.length || (!allowMissing && have.length < members.length)) return null
+  const vals = have.map(m => byCountry[m])
   const k = vals.length
   const value = vals.reduce((s, v) => s + v.value, 0) / k
   const ses = vals.map(v => v.se)
   const se = ses.every(s => s != null) ? Math.sqrt(ses.reduce((s, x) => s + x * x, 0)) / k : null
-  return { value, se, n: vals.reduce((s, v) => s + v.n, 0), n_countries: k }
+  const out = { value, se, n: vals.reduce((s, v) => s + v.n, 0), n_countries: k }
+  if (yearOf) {
+    const yrs = have.map(yearOf)
+    out.year_mid = median(yrs)
+    out.year_min = Math.min(...yrs)
+    out.year_max = Math.max(...yrs)
+  }
+  return out
+}
+
+/** Median as R's median(): the mean of the two middle values for an even count. */
+export function median(xs) {
+  const s = [...xs].sort((a, b) => a - b)
+  const n = s.length
+  if (!n) return null
+  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2
+}
+
+/** "R7 (2016/18)" from the round and its members' fieldwork years (ab_region()'s round_label). */
+export function roundLabel(round, yearMin, yearMax) {
+  return yearMin === yearMax ? `R${round} (${yearMin})` : `R${round} (${yearMin}/${String(yearMax).slice(2, 4)})`
 }
 
 /* ── Pearson correlation p-value (two-sided t-test) ─────────── */

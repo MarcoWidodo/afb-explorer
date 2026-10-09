@@ -1,10 +1,8 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
-import { geoOrthographic, geoPath, geoGraticule10 } from 'd3-geo'
+import { geoOrthographic, geoPath, geoGraticule10, geoCentroid } from 'd3-geo'
 import { feature } from 'topojson-client'
 import { api, useData } from '../../context/DataProvider'
 
-// Stagger order for draw-in (roughly geographic sweep)
-const DRAW_ORDER = ['MX', 'GT', 'SV', 'HN', 'NI', 'CR', 'PA', 'DO', 'VE', 'CO', 'EC', 'PE', 'BO', 'BR', 'PY', 'UY', 'AR', 'CL']
 
 
 export default function GlobeCanvas({ width = 420, height = 420 }) {
@@ -35,10 +33,8 @@ export default function GlobeCanvas({ width = 420, height = 420 }) {
           }
         })
 
-        // Sort surveyed countries by draw order
-        absFeatures.sort((a, b) =>
-          DRAW_ORDER.indexOf(a._a2) - DRAW_ORDER.indexOf(b._a2)
-        )
+        // draw-in sweeps west to east
+        absFeatures.sort((a, b) => geoCentroid(a)[0] - geoCentroid(b)[0])
 
         dataRef.current = { land, absFeatures, otherFeatures, graticule: geoGraticule10() }
         setLoaded(true)
@@ -63,16 +59,16 @@ export default function GlobeCanvas({ width = 420, height = 420 }) {
     const projection = geoOrthographic()
       .translate([width / 2, height / 2])
       .scale(width * 0.42)
-      .rotate([75, 15, 0]) // centred on Latin America
+      .rotate([-20, -5, 0]) // centred on Africa
       .clipAngle(90)
 
     const path = geoPath(projection, ctx)
 
     const startTime = performance.now()
     const DRAW_IN_START = 600    // ms before first country starts drawing
-    const DRAW_IN_STAGGER = 180  // ms between each country
+    const DRAW_IN_STAGGER = 70   // ms between each country (45 countries)
     const DRAW_IN_DURATION = 500 // ms for each country's animation
-    const ROTATION_START = DRAW_IN_START + DRAW_ORDER.length * DRAW_IN_STAGGER + 800
+    const ROTATION_START = DRAW_IN_START + absFeatures.length * DRAW_IN_STAGGER + 800
     const ROTATION_SPEED = 0.008 // degrees per frame (~0.5°/sec at 60fps)
 
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -131,7 +127,7 @@ export default function GlobeCanvas({ width = 420, height = 420 }) {
         if (progress <= 0) return // not started yet
 
         const eased = 1 - Math.pow(1 - progress, 3) // ease-out cubic
-        const color = getCSSColor(`--country-${f._a2}`)
+        const color = getCSSColor(`--region-${manifest.countries[f._a2]?.subregion || 'none'}`)
 
         ctx.beginPath()
         path(f)

@@ -26,15 +26,16 @@
   --chart-1: #5C7A5C; --chart-2: #B85C38; --chart-3: #4A7B8C; --chart-4: #8B6B4A;
   --chart-5: #7B5E7B; --chart-6: #C4956A; --chart-7: #5A6E5A; --chart-8: #9C5D5D;
 
-  /* Country colours: 18 hues in the site's muted, earthy register. The 16 countries surveyed in
-     every year 1996-2024 (LB_SET_BAL16) get the 16 well-separated hues; the Dominican Republic
-     (from 2004) and Nicaragua (not 2023-24) get two neutral greys of different lightness. */
-  --country-AR: #3D6F8E; --country-MX: #C0582F; --country-CL: #7E57A6;
-  --country-CO: #B8901A; --country-BR: #4E8A4E; --country-PE: #9E2F3A;
-  --country-VE: #2A8C82; --country-EC: #B5648F; --country-BO: #6B7F2A;
-  --country-PY: #D17F5B; --country-UY: #5B8FC7; --country-GT: #8C6239;
-  --country-SV: #3E4E8C; --country-HN: #A07AC0; --country-CR: #6F9E6F;
-  --country-PA: #C9A06B; --country-DO: #7A8288; --country-NI: #3E3A36;
+  /* Selection slots: 45 countries cannot each have a distinct hue, so a country's colour is
+     its position in the current selection. The first 8 slots are the most distinct; at most
+     4 lines are recommended in print, where line type and marker shape do the work. */
+  --slot-0: #3D6F8E; --slot-1: #C0582F; --slot-2: #4E8A4E; --slot-3: #7E57A6;
+  --slot-4: #B8901A; --slot-5: #2A8C82; --slot-6: #9E2F3A; --slot-7: #B5648F;
+  --slot-8: #6B7F2A; --slot-9: #D17F5B; --slot-10: #5B8FC7; --slot-11: #8C6239;
+  --slot-12: #3E4E8C; --slot-13: #A07AC0; --slot-14: #6F9E6F; --slot-15: #7A8288;
+  /* AB subregions (home-page globe and coverage grid; country dots outside a selection) */
+  --region-West: #C0582F; --region-Southern: #3D6F8E; --region-East: #4E8A4E;
+  --region-North: #7E57A6; --region-Central: #B8901A; --region-none: #9A8D82;
 
   --dock-bg: rgba(255, 255, 255, 0.72);
   --dock-border: rgba(0, 0, 0, 0.06);
@@ -61,12 +62,12 @@
   --chart-1: #6ECF97; --chart-2: #E8845A; --chart-3: #64B5F6; --chart-4: #DCB060;
   --chart-5: #BA8FD6; --chart-6: #F0A868; --chart-7: #80CBC4; --chart-8: #EF7070;
 
-  --country-AR: #6FA8D6; --country-MX: #E8845A; --country-CL: #B08FE0;
-  --country-CO: #E0C050; --country-BR: #7CC47C; --country-PE: #E0626E;
-  --country-VE: #5CCFC2; --country-EC: #E091BC; --country-BO: #A9BF5A;
-  --country-PY: #F0A585; --country-UY: #8DBDF0; --country-GT: #C99467;
-  --country-SV: #8494E0; --country-HN: #CDB0E8; --country-CR: #9CCB9C;
-  --country-PA: #E8C79A; --country-DO: #8C99A3; --country-NI: #D3CABE;
+  --slot-0: #6FA8D6; --slot-1: #E8845A; --slot-2: #7CC47C; --slot-3: #B08FE0;
+  --slot-4: #E0C050; --slot-5: #5CCFC2; --slot-6: #E0626E; --slot-7: #E091BC;
+  --slot-8: #A9BF5A; --slot-9: #F0A585; --slot-10: #8DBDF0; --slot-11: #C99467;
+  --slot-12: #8494E0; --slot-13: #CDB0E8; --slot-14: #9CCB9C; --slot-15: #8C99A3;
+  --region-West: #E8845A; --region-Southern: #6FA8D6; --region-East: #7CC47C;
+  --region-North: #B08FE0; --region-Central: #E0C050; --region-none: #6B7A8D;
 
   --dock-bg: rgba(15, 20, 25, 0.82);
   --dock-border: rgba(255, 255, 255, 0.06);
@@ -2084,7 +2085,7 @@ a:hover { color: var(--color-accent-hover); }
   white-space: nowrap;
 }
 
-.corr-th-num { text-align: right; }
+.corr-th-num, .corr-table thead th.corr-th-num { text-align: right; }
 
 .corr-table tbody td {
   padding: 0.5rem 0.75rem;
@@ -2372,3 +2373,25 @@ a:hover { color: var(--color-accent-hover); }
 .about-table code { word-break: break-all; }
 .about-table.about-small td:nth-child(2) { white-space: normal; }
 @media (max-width: 640px) { .about-table.about-small td:first-child { white-space: normal; } }
+
+/* ── Round selector (Afrobarometer: 10 rounds) ── */
+.round-picker { display: flex; flex-direction: column; gap: 0.35rem; width: 100%; max-width: 920px; }
+.round-picker-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.round-strip { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; width: 100%; }
+.round-cell { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 0.38rem 0.2rem; border-radius: 8px;
+  border: 1px solid var(--color-border); background: var(--color-bg-raised); color: var(--color-text-secondary); cursor: pointer;
+  font-family: var(--font-body); transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease; min-width: 0; }
+.round-cell:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-text); }
+.round-cell.active { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-bg-raised); }
+.round-cell:disabled { opacity: 0.35; cursor: not-allowed; text-decoration: line-through; }
+.round-cell-label { font-size: 0.84rem; font-weight: 700; line-height: 1.1; }
+.round-cell-years { font-size: 0.66rem; font-family: var(--font-mono); opacity: 0.85; white-space: nowrap; }
+.round-select-wrap { display: none; max-width: 260px; }
+@media (max-width: 760px) {
+  .round-strip { display: none; }
+  .round-select-wrap { display: block; }
+}
+.source-toggle .mode-btn { font-size: 0.8rem; }
+.round-label-chip { font-family: var(--font-mono); font-size: 0.72rem; color: var(--color-text-tertiary); }
+.detail-qn-grid.rounds { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.detail-jc { font-size: 0.78rem; color: var(--color-text-secondary); margin-top: 0.2rem; }

@@ -16,9 +16,10 @@ export const COLOR_SCHEMES = {
 
 /**
  * Choropleth of one value per country.
- * geo: TopoJSON (region-50m.json). values: { ISO2: { value, se, n } }. isoByNumeric: { '392': 'JP', … }
+ * geo: TopoJSON (region-50m.json). values: { ISO3: { value, se, n } }. isoByNumeric: { '566': 'NGA', … }
+ * small: ISO3 codes always drawn with a marker (island and small states: CPV, STP, COM, MUS, SYC, GMB, SWZ, LSO)
  */
-export default function ChoroplethMap({ geo, values, isoByNumeric, countryName, scheme, flipped, format, legendTitle, printMode, svgRef, ariaLabel }) {
+export default function ChoroplethMap({ geo, values, isoByNumeric, countryName, scheme, flipped, format, legendTitle, printMode, svgRef, ariaLabel, small }) {
   const [wrapRef, width] = useWidth()
   const uid = useUid('map')
   const [tip, setTip] = useState(null)
@@ -26,7 +27,7 @@ export default function ChoroplethMap({ geo, values, isoByNumeric, countryName, 
 
   const features = useMemo(() => (geo ? feature(geo, geo.objects.countries).features : []), [geo])
   const surveyed = useMemo(() => features.filter(f => isoByNumeric[f.id]), [features, isoByNumeric])
-  // height follows the region's shape (wide for Asia-Pacific, tall for Latin America)
+  // height follows the region's shape (wide for Asia-Pacific, tall for Latin America and Africa)
   const height = useMemo(() => {
     if (!surveyed.length) return Math.round(width * 0.62)
     const fc = { type: 'FeatureCollection', features: surveyed }
@@ -86,13 +87,12 @@ export default function ChoroplethMap({ geo, values, isoByNumeric, countryName, 
                   onMouseMove={iso ? e => hover(e, iso) : undefined} style={{ cursor: iso ? 'pointer' : 'default' }} />
           )
         })}
-        {/* small territories (Singapore, Hong Kong) get a visible marker */}
+        {/* island and small states get a visible marker */}
         {surveyed.map((f, fi) => {
           const iso = isoByNumeric[f.id]
           const area = (g) => { const [[x0, y0], [x1, y1]] = path.bounds(g); return (x1 - x0) * (y1 - y0) }
-          // only for territories too small to see, and only once per country (Australia also owns
-          // the Ashmore and Cartier Islands, which share its code)
-          if (area(f) > 60 || surveyed.some((g, gi) => gi !== fi && isoByNumeric[g.id] === iso && area(g) > area(f))) return null
+          // listed small states, or anything too small to see; once per country (its largest part)
+          if (!(small?.has(iso) || area(f) <= 60) || surveyed.some((g, gi) => gi !== fi && isoByNumeric[g.id] === iso && area(g) > area(f))) return null
           const [cx, cy] = projection(geoCentroidSafe(f))
           const v = values[iso]
           return (

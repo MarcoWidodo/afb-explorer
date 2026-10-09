@@ -6,8 +6,9 @@ import { useData } from '../../context/DataProvider'
 export default function WaveDotMatrix() {
   const { manifest } = useData()
   const WAVES = manifest.waves.map(w => ({ num: w.id, label: w.label, years: w.years }))
-  // Many units (survey years): a dense calendar grid in which years without a survey are thin gaps
-  const dense = WAVES.length > 8
+  // Many calendar-year units (LB): a dense calendar grid in which years without a survey are thin gaps.
+  // Afrobarometer's 10 rounds keep labelled columns.
+  const dense = manifest.unit_label === 'Year' && WAVES.length > 8
   const columns = useMemo(() => {
     if (!dense) return WAVES.map(w => ({ ...w, gap: false }))
     const out = []
@@ -25,7 +26,7 @@ export default function WaveDotMatrix() {
 
   // Build sorted country list with wave presence
   const countries = useMemo(() => Object.entries(manifest.countries)
-      .map(([code, info]) => ({ code, name: info.name, waves: Object.keys(info.waves).map(Number),
+      .map(([code, info]) => ({ code, name: info.name, region: info.subregion, waves: Object.keys(info.waves).map(Number),
                                 n: info.waves }))
       .sort((a, b) => a.name.localeCompare(b.name)), [manifest])
 
@@ -50,7 +51,7 @@ export default function WaveDotMatrix() {
           >
             {dense
               ? <span className="dot-matrix-wave-num">’{String(w.num).slice(2)}</span>
-              : <><span className="dot-matrix-wave-num">W{w.num}</span>
+              : <><span className="dot-matrix-wave-num">{w.label}</span>
                   <span className="dot-matrix-wave-years">{w.years}</span></>}
 
             {/* Tooltip on wave header hover */}
@@ -63,14 +64,14 @@ export default function WaveDotMatrix() {
                   exit={{ opacity: 0, y: -6, scale: 0.95 }}
                   transition={{ duration: 0.18 }}
                 >
-                  <div className="dot-matrix-tooltip-title">{dense ? w.label : `Wave ${w.num} (${w.years})`}</div>
+                  <div className="dot-matrix-tooltip-title">{dense ? w.label : `Round ${w.num} (${w.years})`}</div>
                   <div className="dot-matrix-tooltip-count">{hoveredWaveCountries.length} countries</div>
                   <div className="dot-matrix-tooltip-chips">
                     {hoveredWaveCountries.map(c => (
                       <span
                         key={c.code}
                         className="timeline-chip"
-                        style={{ '--chip-color': `var(--country-${c.code})` }}
+                        style={{ '--chip-color': `var(--region-${c.region})` }}
                       >
                         <span className="timeline-chip-dot" />
                         {c.name}
@@ -99,7 +100,7 @@ export default function WaveDotMatrix() {
             <div className={`dot-matrix-row-label${hoveredCountry === c.code ? ' active' : ''}`}>
               <span
                 className="dot-matrix-country-dot"
-                style={{ background: `var(--country-${c.code})` }}
+                style={{ background: `var(--region-${c.region})` }}
               />
               <span className="dot-matrix-country-code">{c.code}</span>
               <span className="dot-matrix-country-name">{c.name}</span>
@@ -120,12 +121,12 @@ export default function WaveDotMatrix() {
                 <div
                   key={w.num}
                   className={`dot-matrix-cell${isHighlighted ? ' highlighted' : ''}${isDimmed ? ' dimmed' : ''}`}
-                  title={present ? `${c.name}, ${w.label}${dense ? '' : `: ${c.n[w.num].year}`}, N = ${c.n[w.num].n.toLocaleString('en-US')}` : `${c.name}: not surveyed in ${w.label}`}
+                  title={present ? `${c.name}, ${w.label}${dense ? '' : `: fieldwork ${c.n[w.num].year}`}, N = ${c.n[w.num].n.toLocaleString('en-US')}` : `${c.name}: not surveyed in ${w.label}`}
                 >
                   <motion.div
                     className={`dot-matrix-dot${present ? ' filled' : ' empty'}`}
                     style={present ? {
-                      '--dot-color': `var(--country-${c.code})`,
+                      '--dot-color': `var(--region-${c.region})`,
                     } : {}}
                     initial={{ scale: 0 }}
                     whileInView={{ scale: 1 }}
@@ -148,10 +149,12 @@ export default function WaveDotMatrix() {
       </div>
       {/* Legend */}
       <div className="dot-matrix-legend">
-        <span className="dot-matrix-legend-item">
-          <span className="dot-matrix-dot filled" style={{ '--dot-color': 'var(--color-accent)' }} />
-          Surveyed
-        </span>
+        {['West', 'East', 'Southern', 'Central', 'North'].map(r => (
+          <span key={r} className="dot-matrix-legend-item">
+            <span className="dot-matrix-dot filled" style={{ '--dot-color': `var(--region-${r})` }} />
+            {r}
+          </span>
+        ))}
         <span className="dot-matrix-legend-item">
           <span className="dot-matrix-dot empty" />
           Not surveyed

@@ -1,8 +1,10 @@
-import { useData } from '../../context/DataProvider'
+import { useData, slotColor } from '../../context/DataProvider'
 
 /**
- * Country chips. `available` = ISO2 codes that can be chosen; others are shown disabled
- * (e.g. countries where the question was not asked).
+ * Country chips. `available` = ISO3 codes that can be chosen; others are shown disabled
+ * (e.g. countries where the question was not asked). A chosen country takes the colour of
+ * its slot in the selection (the order it was picked), which is the colour of its line,
+ * bar or dot in the chart.
  */
 export default function CountryPicker({ countries, available, selected, onChange, label = 'Countries', max }) {
   const { countryName } = useData()
@@ -23,12 +25,13 @@ export default function CountryPicker({ countries, available, selected, onChange
       </div>
       <div className="country-grid">
         {countries.map(code => {
-          const on = selected.includes(code)
+          const i = selected.indexOf(code)
+          const on = i >= 0
           const dis = !avail.has(code)
           return (
             <button key={code} className={`country-chip${on ? ' active' : ''}${dis ? ' disabled' : ''}`} onClick={() => toggle(code)}
                     disabled={dis} aria-pressed={on} title={dis ? `${countryName(code)}: not asked` : countryName(code)}
-                    style={{ '--chip-color': `var(--country-${code})` }}>
+                    style={{ '--chip-color': on ? slotColor(i) : 'var(--color-text-tertiary)' }}>
               <span className="country-chip-dot" />
               <span className="country-chip-code">{code}</span>
               <span className="country-chip-name">{countryName(code)}</span>

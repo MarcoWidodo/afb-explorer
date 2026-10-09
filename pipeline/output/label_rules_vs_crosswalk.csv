@@ -1,0 +1,7 @@
+"label","xw","lab_rule","same_base","respondents"
+"No","offscale","substantive",TRUE,47782
+"You were too young to vote","not_asked","substantive",FALSE,9783
+"yes, this country is a democracy","offscale","substantive",TRUE,1397
+"No election in my area","not_asked","substantive",FALSE,161
+NA,"nonresponse","substantive",FALSE,127
+"Other","substantive","offscale",TRUE,37

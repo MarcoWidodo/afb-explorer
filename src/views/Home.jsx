@@ -9,29 +9,29 @@ import WaveDotMatrix from '../components/shared/WaveDotMatrix'
 const FEATURES = [
   {
     icon: BarChart3,
-    title: 'Single-Year Explorer',
-    desc: 'Answers to any question in any survey year, compared across countries and by gender, age, education and town size.',
+    title: 'Single-Round Explorer',
+    desc: 'Answers to any question in any round, from the harmonised battery or from the round\'s own file, compared across countries and by gender, age, education and urban/rural.',
     path: '/explore',
     color: 'var(--chart-1)',
   },
   {
     icon: TrendingUp,
     title: 'Time-Series Explorer',
-    desc: 'Every question asked in three or more years, on a real 1995–2024 year axis, with regional averages over fixed country sets.',
+    desc: 'The harmonised battery across Rounds 1–10 (1999–2025): countries at their own fieldwork year, regional averages over fixed country sets, comparability breaks never bridged.',
     path: '/trends',
     color: 'var(--chart-3)',
   },
   {
     icon: Globe2,
     title: 'Choropleth Map',
-    desc: 'One number per country, from any question in any year, on a map of Latin America.',
+    desc: 'One number per country, from any question in any round, on a map of Africa.',
     path: '/map',
     color: 'var(--chart-4)',
   },
   {
     icon: GitCompareArrows,
     title: 'Correlations Explorer',
-    desc: 'How two questions move together in a survey year, across countries or among respondents within a country.',
+    desc: 'How two questions move together in a round, across countries or among respondents within a country.',
     path: '/correlations',
     color: 'var(--chart-5)',
   },
@@ -129,9 +129,10 @@ export default function Home() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.55, duration: 0.6 }}
             >
-              Explore {y1 - y0 + 1} years of public opinion ({y0}–{y1}) from {totalN.toLocaleString('en-US')} interviews
-              in {totalCountries} countries of {manifest.survey.region}: support for democracy, trust in institutions,
-              the economy, corruption and crime, {manifest.n_questions} questions in all, every one asked in at least three survey years.
+              Explore {nWaves} rounds of public opinion ({y0}–{y1}) from {totalN.toLocaleString('en-US')} interviews
+              in {totalCountries} African countries: {manifest.n_questions} questions harmonised across rounds (support for democracy,
+              trust, corruption, government performance, lived poverty, participation and the media){manifest.round_files ? <>, and
+              every one of the {manifest.n_round_questions.toLocaleString('en-US')} questions in the round files</> : null}.
             </motion.p>
 
             <motion.div
@@ -155,7 +156,7 @@ export default function Home() {
             >
               <div className="hero-stat">
                 <span className="hero-stat-num"><CountUp target={nWaves} duration={1} /></span>
-                <span className="hero-stat-label">Survey {manifest.unit_label === 'Year' ? 'Years' : 'Waves'}</span>
+                <span className="hero-stat-label">{manifest.unit_label === 'Year' ? 'Survey Years' : `${manifest.unit_label}s`}</span>
               </div>
               <div className="hero-stat-divider" />
               <div className="hero-stat">
@@ -192,7 +193,7 @@ export default function Home() {
             viewport={{ once: true, amount: 0.5 }}
             transition={{ duration: 0.6 }}
           >
-            {manifest.unit_label === 'Year' ? `${nWaves} Survey Years, ${y0}–${y1}` : `${nWaves === 6 ? 'Six' : nWaves} Waves of Data`}
+            {manifest.unit_label === 'Year' ? `${nWaves} Survey Years, ${y0}–${y1}` : `${nWaves} ${manifest.unit_label}s, ${y0}–${y1}`}
           </motion.h2>
 
           <motion.p
@@ -202,7 +203,7 @@ export default function Home() {
             viewport={{ once: true, amount: 0.5 }}
             transition={{ delay: 0.15, duration: 0.6 }}
           >
-            Survey coverage across {totalCountries} countries, {y0}–{y1}. Hover a dot for the sample size{manifest.unit_label === 'Year' ? '' : ' and fieldwork year'}.
+            Survey coverage across {totalCountries} countries, coloured by Afrobarometer subregion. Within a round, countries were surveyed in different years: hover a dot for the fieldwork year and sample size.
           </motion.p>
 
           <motion.div

@@ -7,9 +7,11 @@ import Tooltip from './Tooltip'
 
 /**
  * Time-series chart on a real year axis.
- * series: [{ key, label, color, bold, points: [{ x, y, se, n, wave, waveIdx, note }] }]
- *   - x is the fieldwork year; waveIdx is the position of the wave in the item's wave list,
- *     used to break the line where a series skips a wave (no interpolation).
+ * series: [{ key, label, color, bold, points: [{ x, y, se, n, waveIdx, note, pointLabel }] }]
+ *   - x is the fieldwork year (hybrid axis: a country's own year, or a regional point's median
+ *     year); waveIdx is the point's position on the line (lib/trend.js), used to break the line
+ *     where a series skips a round or crosses a declared break (no interpolation).
+ *   - pointLabel: drawn above the points of a bold (regional) series, e.g. "R7".
  * bands: [{ label, x0, x1 }] wave spans drawn along the top.
  * xDomain: fixed [x0, x1] (otherwise fitted to the data); xTicks: labelled years;
  * minorTicks: unlabelled tick marks (e.g. every survey year, so gap years show).
@@ -123,6 +125,11 @@ export default function LineChart({
               {s.points.map((p, i) => (
                 <Marker key={i} shape={st.marker} x={x(p.x)} y={y(p.y)} r={s.bold ? 4.5 : 3.8}
                         fill={printMode ? '#FFFFFF' : 'var(--color-bg-raised)'} stroke={st.stroke} strokeWidth={2} />
+              ))}
+              {/* round labels on a regional line (hybrid axis: the point sits at the round's median year) */}
+              {s.bold && width > 520 && s.points.map((p, i) => p.pointLabel && (
+                <text key={`l${i}`} x={x(p.x)} y={y(p.y) - 10} textAnchor="middle" fontSize={10} fontWeight={600}
+                      fill={printMode ? '#404040' : 'var(--color-text-secondary)'} fontFamily={printMode ? PRINT_FONT : 'var(--font-mono)'}>{p.pointLabel}</text>
               ))}
             </g>
           )

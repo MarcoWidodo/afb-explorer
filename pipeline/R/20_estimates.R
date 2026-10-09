@@ -52,6 +52,8 @@ make_bins <- function(v) {
 bin_index <- function(v, bins) findInterval(v, bins$breaks) + 1L
 
 r1 <- function(x) round(x, 1)
+# Percentages are written with DIGITS decimals (AB: 2 for all-respondent cells, so equal-weight
+# averages of published cells match the merge to ~0.001; subgroup cells are rounded to 1 by slim()).
 
 # x      numeric codes for every respondent in the wave
 # cls    "substantive" (on the response scale) / "offscale" (valid answer off the
@@ -60,7 +62,7 @@ r1 <- function(x) round(x, 1)
 # codes  substantive codes in display order; nr_codes nonresponse codes
 # xbin   for continuous variables, the bin index (display codes = 1..B)
 estimate_cells <- function(x, cls, codes, nr_codes, cty, wt, memb, with_mean, xbin = NULL,
-                           sparse = FALSE) {
+                           sparse = FALSE, digits = 1) {
   disp <- if (is.null(xbin)) x else xbin
   dt <- memb[, .(row, grp)]
   dt[, `:=`(cty = cty[row], w = wt[row], x = x[row], d = disp[row], cl = cls[row])]
@@ -84,7 +86,7 @@ estimate_cells <- function(x, cls, codes, nr_codes, cty, wt, memb, with_mean, xb
     ri <- match(paste(sub_k$cty, sub_k$grp), key); ci <- match(sub_k$d, codes)
     stopifnot(!anyNA(ci))                     # every substantive value has a display code
     P[cbind(ri, ci)] <- sub_k$sw; C[cbind(ri, ci)] <- sub_k$n
-    P <- round(100 * P / pmax(cells$sw, 1e-12), 1)
+    P <- round(100 * P / pmax(cells$sw, 1e-12), digits)
   } else {
     sk_list <- split(sub_k[order(d)], by = c("cty", "grp"), sorted = FALSE, drop = TRUE, keep.by = FALSE)
     names(sk_list) <- sub(".", " ", names(sk_list), fixed = TRUE)
@@ -95,7 +97,7 @@ estimate_cells <- function(x, cls, codes, nr_codes, cty, wt, memb, with_mean, xb
       ri <- match(paste(nr_k$cty, nr_k$grp), key); ci <- match(nr_k$x, nr_codes)
       Q[cbind(ri, ci)] <- nr_k$sw
     }
-    Q <- round(100 * Q / cells$sw_asked, 1)
+    Q <- round(100 * Q / cells$sw_asked, digits)
   }
   ne_exact <- cells$sw^2 / cells$sw2
   ne <- round(ne_exact, 1)
@@ -108,7 +110,7 @@ estimate_cells <- function(x, cls, codes, nr_codes, cty, wt, memb, with_mean, xb
       cell$ne <- ne[i]
       if (sparse) {
         sk <- sk_list[[key[i]]]
-        cell$k <- arr(sk$d); cell$p <- arr(r1(100 * sk$sw / cells$sw[i])); cell$c <- arr(sk$n)
+        cell$k <- arr(sk$d); cell$p <- arr(round(100 * sk$sw / cells$sw[i], digits)); cell$c <- arr(sk$n)
       } else {
         cell$p <- arr(P[i, ]); cell$c <- arr(C[i, ])
       }

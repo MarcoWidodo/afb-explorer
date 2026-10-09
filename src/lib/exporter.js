@@ -100,11 +100,15 @@ export async function exportPNG(opts, filename) {
 }
 
 /* ── Tidy CSV (rule 9 of the project's trend-analysis instructions) ──
-   indicator, variable, success_codes, base, country_set, year, iso3, country, value, n, n_countries,
-   plus group and se. Surveys with waves add a `wave` column. Shares keep one decimal, means three. */
+   indicator, variable, success_codes, base, country_set, [round,] year, iso3, country, value, n, n_countries,
+   plus group and se. Shares keep one decimal, means three. */
 export const TIDY_COLUMNS = ['indicator', 'variable', 'success_codes', 'base', 'country_set', 'year',
   'iso3', 'country', 'group', 'value', 'se', 'n', 'n_countries']
 export const TIDY_COLUMNS_WAVES = ['indicator', 'variable', 'success_codes', 'base', 'country_set', 'wave', 'year',
+  'iso3', 'country', 'group', 'value', 'se', 'n', 'n_countries']
+// Afrobarometer (instructions rule 9 / build brief §6): the round, and the fieldwork year the point is
+// plotted at (a country's own year; for a regional value the median year of the set's countries)
+export const TIDY_COLUMNS_ROUNDS = ['indicator', 'variable', 'success_codes', 'base', 'country_set', 'round', 'year',
   'iso3', 'country', 'group', 'value', 'se', 'n', 'n_countries']
 
 function tidyRound(r) {

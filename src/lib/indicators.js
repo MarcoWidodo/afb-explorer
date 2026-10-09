@@ -9,10 +9,10 @@ export function scaleCodes(rec) {
   return rec.codes.filter(c => !off.has(c))
 }
 
-/** Means are offered only where the pipeline allows them (interval-like scales and numeric items). */
+/** Means are offered only where the pipeline allows them (interval-like scales of 7+ points and numeric items). */
 export function meanAllowed(rec, entry) {
   if (entry && entry.m != null) return !!entry.m
-  return rec?.type !== 'nominal'
+  return rec?.type === 'continuous'
 }
 
 export function defaultIndicator(rec, entry) {
@@ -25,8 +25,9 @@ export function defaultIndicator(rec, entry) {
   }
   if (rec.type === 'continuous') return { type: 'mean' }
   const sc = scaleCodes(rec)
-  if (rec.type === 'ordinal') return { type: 'share', codes: sc.length >= 4 ? sc.slice(0, 2) : sc.slice(0, 1) }
-  if (rec.type === 'binary') return { type: 'share', codes: sc.slice(0, 1) }
+  // AB scales mostly run from the negative / "none" end (0 never … 4 always): the top two codes
+  if (rec.type === 'ordinal') return { type: 'share', codes: sc.length >= 4 ? sc.slice(-2) : sc.slice(-1) }
+  if (rec.type === 'binary') return { type: 'share', codes: sc.every(c => c === 0 || c === 1) ? [1] : sc.slice(0, 1) }
   // nominal: the most common answer across countries
   let best = rec.codes[0], bestP = -1
   for (const c of Object.values(rec.est)) {

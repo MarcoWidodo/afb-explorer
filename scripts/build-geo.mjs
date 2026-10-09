@@ -12,7 +12,7 @@ import { geoBounds } from 'd3-geo'
 const require = createRequire(import.meta.url)
 const atlas = (f) => JSON.parse(fs.readFileSync(require.resolve(`world-atlas/${f}`), 'utf8'))
 const [minLon, maxLon, minLat, maxLat] = process.argv.slice(2).map(Number).length === 4
-  ? process.argv.slice(2).map(Number) : [55, 180, -50, 60]   // Asia and the Pacific
+  ? process.argv.slice(2).map(Number) : [-26, 64, -36, 38]   // Africa (ABS: 55 180 -50 60; LB: -120 -30 -60 35)
 
 const out = path.resolve('public/data/geo')
 fs.mkdirSync(out, { recursive: true })

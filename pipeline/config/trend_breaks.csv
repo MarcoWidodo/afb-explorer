@@ -1,7 +1,17 @@
-variable,years,note
-A_007_071,1998,"1998 used a 1–10 scale (no 0); every other year 0–10. 1998 is left out of the trend."
-I_005_001,2003,"2003 offered 4 answers, other years 3. 2003 is left out of the trend."
-E_001_041,1996;2003;2006,"No '0 days' option in 1996, 2003 and 2006. Those years are left out of the trend."
-E_001_061,1996;2003;2006,"No '0 days' option in 1996, 2003 and 2006. Those years are left out of the trend."
-E_001_231,1996;2003;2006,"No '0 days' option in 1996, 2003 and 2006. Those years are left out of the trend."
-I_001_001,all,"Two different formats (yes/no in 1995–2008 and 2024; you / a relative / both in 2009–2023). Use I_001_001_victim for trends."
+variable,breaks,start,note
+trust_president,1|2;2|3,3,"R1 and R2 used different answer wordings (mapped by position), so trust trends start in R3 (instructions rule 6). R1 and R2 values are in the single-round view."
+trust_nec,1|2;2|3,3,"R1 and R2 used different answer wordings (mapped by position), so trust trends start in R3 (instructions rule 6). R1 and R2 values are in the single-round view."
+trust_police,1|2;2|3,3,"R1 and R2 used different answer wordings (mapped by position), so trust trends start in R3 (instructions rule 6). R1 and R2 values are in the single-round view."
+trust_army,1|2;2|3,3,"R1 and R2 used different answer wordings (mapped by position), so trust trends start in R3 (instructions rule 6). R1 and R2 values are in the single-round view."
+trust_courts,1|2;2|3,3,"R1 and R2 used different answer wordings (mapped by position), so trust trends start in R3 (instructions rule 6). R1 and R2 values are in the single-round view."
+trust_parliament,2|3,3,"R2 used a different answer wording (mapped by position), so trust trends start in R3 (instructions rule 6). R2 values are in the single-round view."
+trust_localgov,2|3,3,"R2 used a different answer wording (mapped by position), so trust trends start in R3 (instructions rule 6). R2 values are in the single-round view."
+trust_rulingparty,2|3,3,"R2 used a different answer wording (mapped by position), so trust trends start in R3 (instructions rule 6). R2 values are in the single-round view."
+trust_opposition,2|3,3,"R2 used a different answer wording (mapped by position), so trust trends start in R3 (instructions rule 6). R2 values are in the single-round view."
+trust_tradleaders,2|3,3,"R2 used a different answer wording (mapped by position), so trust trends start in R3 (instructions rule 6). R2 values are in the single-round view."
+dem_extent,1|2,2,"R1 offered an unspecified 'yes, a democracy' answer (off-scale 93), so the trend starts in R2. R1 values are in the single-round view."
+ab_media_free,3|4;4|5;7|8,,"Four wordings (R3 | R4 | R5–R7 | R8+); levels jump between them, so the line is drawn in four separate segments."
+ab_govt_employee,4|5;5|9,,Three wordings (R2–R4 | R5 | R9); the line is drawn in separate segments.
+corr_mps,2|3,,"R2 asked about 'elected leaders', R3+ about Members of Parliament; R2 is not joined to R3."
+voted,1|3;4|5,,Answer options differ (R1 | R3–R4 | R5+); from R5 'too young' is not applicable and leaves the base. The segments are not joined.
+demonstration,9|10,,"R10 asks yes/no (code 94 = No); the share who took part (codes 2–4) is shown, but R9 and R10 are not joined."

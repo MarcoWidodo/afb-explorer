@@ -1,17 +1,18 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react'
 
 /* ─────────────────────────────────────────────────────────────
-   Data layer. Only manifest.json (~10 KB) is fetched at start-up.
-   Everything else is fetched per question when a view needs it, cached for
-   the session, and de-duplicated if two components ask at once.
+   Data layer. Only manifest.json is fetched at start-up. Everything else is
+   fetched per question when a view needs it, cached for the session, and
+   de-duplicated if two components ask at once.
 
-   Latinobarómetro layout (questions are harmonised across years, so one file
-   per question covers every year):
-     index.json               question catalogue
-     v/<var>.json             all respondents, every year  → trends, map, single year
-     g/<year>/<var>.json      subgroup cells for one year   (on demand)
-     r/<year>/index.json      correlatable questions that year
-     r/<year>/<var>.json      within-country correlations of <var> that year
+   Afrobarometer layout (units are rounds 1–10; countries are keyed by ISO3):
+     index.json               harmonised battery: one entry per question, all rounds
+     rounds/<r>.json          every question in round r's own file (scope B)
+     v/<id>.json              all respondents. Battery: every round. Round-file
+                              question (id R7_Q28): its round only
+     g/<r>/<id>.json          subgroup cells for one round (on demand)
+     r/<r>/index.json         battery items correlated in round r (column order)
+     r/<r>/<id>.json          within-country correlations of <id> with those items
    ───────────────────────────────────────────────────────────── */
 
 const BASE = `${import.meta.env.BASE_URL}data`
@@ -33,31 +34,35 @@ function fetchJSON(path) {
 export const api = {
   manifest: () => fetchJSON('manifest.json'),
   index: () => fetchJSON('index.json'),
+  roundIndex: (r) => fetchJSON(`rounds/${r}.json`),
   variable: (id) => fetchJSON(`v/${id}.json`),
-  groups: (year, id) => fetchJSON(`g/${year}/${id}.json`).catch(() => ({ est: {} })),
-  corrIndex: (year) => fetchJSON(`r/${year}/index.json`),
-  correlations: (year, id) => fetchJSON(`r/${year}/${id}.json`),
+  groups: (unit, id) => fetchJSON(`g/${unit}/${id}.json`).catch(() => ({ est: {} })),
+  corrIndex: (unit) => fetchJSON(`r/${unit}/index.json`),
+  correlations: (unit, id) => fetchJSON(`r/${unit}/${id}.json`).catch(() => null),
   geoWorld: () => fetchJSON('geo/world-110m.json'),
   geoRegion: () => fetchJSON('geo/region-50m.json'),
 }
 
+/** Round-file questions have ids like R7_Q28. */
+export const isRoundItem = (id) => /^R\d+_/.test(id || '')
+
 /**
- * One question in one year, in the shape the views use:
- * { ...question metadata, est: { ISO2: { all: cell, men: cell, … } } }.
- * Subgroup cells are merged in when `withGroups` is true.
+ * One question in one unit (round), in the shape the views use:
+ * { ...question metadata, unit, est: { ISO3: { all: cell, men: cell, … } } }.
+ * Subgroup cells are merged in when `groups` is given.
  */
-export function yearRecord(rec, year, groups) {
+export function unitRecord(rec, unit, groups) {
   if (!rec) return null
-  const yy = rec.est[year]
-  if (!yy) return { ...rec, year, est: {} }
+  const uu = rec.est[unit]
+  if (!uu) return { ...rec, unit, est: {} }
   const est = {}
-  for (const [cc, cell] of Object.entries(yy)) est[cc] = { all: cell, ...(groups?.est?.[cc] || {}) }
-  return { ...rec, year, est }
+  for (const [cc, cell] of Object.entries(uu)) est[cc] = { all: cell, ...(groups?.est?.[cc] || {}) }
+  return { ...rec, unit, est }
 }
 
-/** All subgroup files of a question (one per year), for the trend view's breakdowns. */
+/** All subgroup files of a question (one per round), for the trend view's breakdowns. */
 export function loadAllGroups(rec) {
-  return Promise.all(rec.years.map(y => api.groups(y, rec.id).then(g => [y, g.est || {}])))
+  return Promise.all(rec.units.map(u => api.groups(u, rec.id).then(g => [u, g.est || {}])))
     .then(pairs => Object.fromEntries(pairs))
 }
 
@@ -80,23 +85,47 @@ export function useResource(loader, deps) {
   return state
 }
 
-/** One question in one year (with subgroup cells when `withGroups`). */
-export function useYearVariable(id, year, withGroups) {
+/** One question in one round (with subgroup cells when `withGroups`). */
+export function useUnitVariable(id, unit, withGroups) {
   return useResource(
-    () => (id && year ? Promise.all([api.variable(id), withGroups ? api.groups(year, id) : null])
-      .then(([rec, g]) => yearRecord(rec, year, g)) : null),
-    [id, year, withGroups]
+    () => (id && unit ? Promise.all([api.variable(id), withGroups ? api.groups(unit, id) : null])
+      .then(([rec, g]) => unitRecord(rec, unit, g)) : null),
+    [id, unit, withGroups]
   )
 }
 
-/** Several questions in one year (e.g. both axes of a scatter plot). */
-export function useYearVariables(year, ids) {
+/** Several questions in one round (e.g. both axes of a scatter plot). */
+export function useUnitVariables(unit, ids) {
   const key = ids.filter(Boolean).join('|')
   return useResource(
-    () => (key && year ? Promise.all(ids.map(id => (id ? api.variable(id).then(r => yearRecord(r, year)) : null))) : null),
-    [year, key]
+    () => (key && unit ? Promise.all(ids.map(id => (id ? api.variable(id).then(r => unitRecord(r, unit)) : null))) : null),
+    [unit, key]
   )
 }
+
+/**
+ * The question catalogue a single-round view offers: the harmonised battery items asked
+ * in that round, or (source = 'round') every question in that round's own file.
+ * Items: { id, code, q, s, t, d, m, ends, h?, u? } — `code` is what the picker shows.
+ */
+export function useQuestionList(source, unit) {
+  const { data: index } = useResource(() => api.index(), [])
+  const { data: rIndex } = useResource(() => (source === 'round' && unit ? api.roundIndex(unit) : null), [source, unit])
+  return useMemo(() => {
+    if (source === 'round') {
+      if (!rIndex || rIndex.round !== unit) return null
+      return { sections: rIndex.sections, vars: rIndex.vars, battery: index }
+    }
+    if (!index) return null
+    return { sections: index.sections, vars: index.vars.map(v => ({ ...v, code: v.id })), battery: index }
+  }, [source, unit, index, rIndex])
+}
+
+/* Colours. 45 countries cannot each have a distinct hue, so a country's colour comes
+   from its position in the current selection (16 slots, the first 8 most distinct);
+   outside a selection countries take their AB subregion's colour. */
+export const N_SLOTS = 16
+export const slotColor = (i) => `var(--slot-${((i % N_SLOTS) + N_SLOTS) % N_SLOTS})`
 
 const DataContext = createContext(null)
 
@@ -116,16 +145,22 @@ export function DataProvider({ children }) {
     manifest.subgroups.forEach(s => s.groups.forEach(g => { groupLabels[g.id] = g.label }))
     const waveById = Object.fromEntries(manifest.waves.map(w => [w.id, w]))
     const unit = manifest.unit_label || 'Wave'
+    const regionColor = (iso) => `var(--region-${countries[iso]?.subregion || 'none'})`
     return {
       unit,
-      years: manifest.waves.map(w => w.id),
+      units: manifest.waves.map(w => w.id),
       countryName: (iso) => countries[iso]?.name || iso,
-      countryColor: (iso) => `var(--country-${iso})`,
+      // with a selection list: the country's slot colour; otherwise its subregion colour
+      countryColor: (iso, selection) => {
+        const i = selection ? selection.indexOf(iso) : -1
+        return i >= 0 ? slotColor(i) : regionColor(iso)
+      },
+      regionColor,
       iso3: (iso) => countries[iso]?.iso3 || iso,
       allCountries: Object.keys(countries).sort(byName),
       waveCountries: (w) => [...(waveById[w]?.countries || [])].sort(byName),
       wave: (w) => waveById[w],
-      waveLabel: (w) => waveById[w] ? (unit === 'Year' ? waveById[w].label : `${waveById[w].label} (${waveById[w].years})`) : `${unit} ${w}`,
+      waveLabel: (w) => waveById[w] ? `${waveById[w].label} (${waveById[w].years})` : `${unit} ${w}`,
       fieldworkYear: (iso, w) => countries[iso]?.waves?.[w]?.year ?? null,
       groupLabel: (g) => groupLabels[g] || g,
       countrySet: (id) => manifest.country_sets.find(s => s.id === id),
@@ -148,16 +183,16 @@ export function useData() {
 /** Source line used under every chart and in every export. */
 export function useSourceNote() {
   const { manifest } = useData()
-  return useCallback(({ waves, base, weighted = true, set, extra, gaps } = {}) => {
+  return useCallback(({ waves, base, weighted = true, set, extra, hybrid } = {}) => {
     if (!manifest) return ''
-    const nr = manifest.survey.nr_text || "Don't know / no answer"
+    const nr = manifest.survey.nr_text || "Don't know / refused"
     const parts = [`Source: ${manifest.survey.name}${waves ? `, ${waves}` : ''}.`]
-    if (weighted) parts.push('Weighted within country-year.')
+    if (weighted) parts.push('Weighted within country-round (EA-level weight).')
     if (base === 'valid') parts.push(`% of valid answers; ${nr.toLowerCase()} excluded from the base.`)
     if (base === 'asked') parts.push(`% of respondents asked; ${nr.toLowerCase()} included in the base.`)
     if (set) parts.push(set)
+    if (hybrid) parts.push("Country points at each country's fieldwork year; regional points at the median fieldwork year of the set's countries in each round.")
     if (extra) parts.push(extra)
-    if (gaps && manifest.gaps_note) parts.push(manifest.gaps_note)
     return parts.join(' ')
   }, [manifest])
 }
